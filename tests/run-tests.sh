@@ -165,6 +165,17 @@ run "$D" bash setup-mailserver.sh -y
 check "GMX-Passwort mit Leerzeichen bleibt unverändert" has "$D/data/config/fetchmail.cf" 'pass "mit leer zeichen"'
 check "Gmail-App-Passwort wird von Leerzeichen befreit" has "$D/data/config/fetchmail.cf" 'pass "abcdefghijklmnop"'
 
+D="$(new_instance gmxat)"
+printf '%s\n' 'gina@gmx.at|GinaPw123|gina' > "$D/accounts.conf"
+run "$D" bash setup-mailserver.sh -y
+check "gmx.at: Installation endet mit Exit-Code 0" test "$RC" -eq 0
+check "gmx.at: wird als GMX abgeholt (pop.gmx.net)" has "$D/data/config/fetchmail.cf" "poll 'pop.gmx.net'"
+check "gmx.at: Relay über mail.gmx.net" has "$D/data/config/postfix-relaymap.cf" "gina@home.lan [mail.gmx.net]:587"
+check "gmx.at: Import über imap.gmx.net" bash -c "grep -qF 'Host imap.gmx.net' '$D'/stub.mbsync.*"
+printf '%s\n' 'gina@gmx.at|GinaPw123' > "$D/accounts.conf"
+run "$D" bash setup-mailserver.sh --check
+check "gmx.at: --check prüft IMAP und POP3 bei GMX" bash -c "grep -qF 'imaps://imap.gmx.net/' '$D/stub.curl' && grep -qF 'pop3s://pop.gmx.net/' '$D/stub.curl'"
+
 # ---------------------------------------------------------------- 3. Zugangsdaten prüfen
 title "3. setup-mailserver.sh --check"
 D="$(new_instance check)"
