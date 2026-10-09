@@ -226,7 +226,7 @@ MARK="$BASE/data/import-done"
 #   legacy  = Statusdateien von mbsync vorhanden (Import mit einer älteren Skriptversion)
 #   fresh   = noch nie importiert
 import_state() {   # $1 = lokale Adresse, $2 = Postfach-Ordner
-  if   [[ -f "$MARK/$1.done" ]];    then echo done
+  if   [[ -f "$MARK/$1.done" ]];    then echo "done"
   elif [[ -f "$MARK/$1.started" ]]; then echo resume
   elif [[ -n "$(find "$2" -type f \( -name .mbsyncstate -o -name .uidvalidity \) -print -quit 2>/dev/null)" ]]; then echo legacy
   else echo fresh; fi

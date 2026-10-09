@@ -10,7 +10,8 @@
 #   ./backup-mail.sh --install /pfad/zum/backupziel   täglich um 03:30 per Cron einrichten
 #
 # Das Ziel sollte eine ANDERE Platte, ein NAS oder ein anderer Rechner (Mount) sein.
-# Aufbewahrung: 14 Tages- und 6 Monats-Snapshots (Umgebungsvariablen KEEP_DAILY, KEEP_MONTHLY).
+# Aufbewahrung: Sicherungen, die älter als KEEP_DAYS Tage sind (Standard 7), werden bei jedem Lauf automatisch gelöscht.
+# Der neueste Snapshot bleibt immer erhalten. Monatssnapshots gibt es nur mit KEEP_MONTHLY > 0 (Standard 0 = keine).
 # Optional:
 #   HC_URL=https://hc-ping.com/xxxx   meldet Start, Erfolg und Fehler an Healthchecks.io
 #   REQUIRE_MOUNT=1                   bricht ab, wenn das Ziel kein eigener Mountpunkt ist
@@ -28,8 +29,8 @@
 
 set -euo pipefail
 
-KEEP_DAILY="${KEEP_DAILY:-14}"
-KEEP_MONTHLY="${KEEP_MONTHLY:-6}"
+KEEP_DAYS="${KEEP_DAYS:-7}"
+KEEP_MONTHLY="${KEEP_MONTHLY:-0}"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SRC="$(dirname "$SELF")"
 CRON_DIR="${CRON_DIR:-/etc/cron.d}"            # die drei Pfade sind nur für Tests änderbar
@@ -46,16 +47,16 @@ die() { fail "$@"; }
 
 [[ $EUID -eq 0 ]] || exec sudo -E bash "$SELF" "$@"
 
-# Eingaben prüfen: 0 würde alle Snapshots löschen, auch den neuesten
-[[ "$KEEP_DAILY" =~ ^[1-9][0-9]*$ ]]   || die "KEEP_DAILY muss eine Zahl >= 1 sein (ist: $KEEP_DAILY)."
-[[ "$KEEP_MONTHLY" =~ ^[1-9][0-9]*$ ]] || die "KEEP_MONTHLY muss eine Zahl >= 1 sein (ist: $KEEP_MONTHLY)."
+# Eingaben prüfen: 0 Tage würde jede Sicherung sofort wieder löschen
+[[ "$KEEP_DAYS" =~ ^[1-9][0-9]*$ ]]    || die "KEEP_DAYS muss eine Zahl >= 1 sein (ist: $KEEP_DAYS)."
+[[ "$KEEP_MONTHLY" =~ ^[0-9]+$ ]]      || die "KEEP_MONTHLY muss eine Zahl >= 0 sein (ist: $KEEP_MONTHLY)."
 
 if [[ "${1:-}" == "--install" ]]; then
   DEST="${2:-}"; [[ -n "$DEST" ]] || die "Zielordner fehlt. Beispiel: $0 --install /mnt/backup/mail"
   DEST="$(readlink -f "$DEST")"
   [[ "$DEST" == /* && "$DEST" != "/" ]] || die "Ungültiges Ziel: $DEST"
   [[ "$DEST" =~ ^[A-Za-z0-9._/@+-]+$ ]] || die "Das Ziel enthält Sonderzeichen oder Leerzeichen, die in einer Cron-Zeile nicht sicher sind: $DEST"
-  ENV_PART="KEEP_DAILY=$KEEP_DAILY KEEP_MONTHLY=$KEEP_MONTHLY"
+  ENV_PART="KEEP_DAYS=$KEEP_DAYS KEEP_MONTHLY=$KEEP_MONTHLY"
   [[ "${REQUIRE_MOUNT:-0}" != "1" ]] || ENV_PART+=" REQUIRE_MOUNT=1"
   if [[ -n "${HC_URL:-}" ]]; then
     [[ "$HC_URL" =~ ^https://[A-Za-z0-9._/-]+$ ]] || die "HC_URL hat ein ungültiges Format."
@@ -124,12 +125,22 @@ ln -sfn "$DEST/daily/$NAME" "$DEST/latest"
 
 # Monatssnapshot (Hardlink-Kopie, braucht kaum zusätzlichen Platz); fehlt er, wird er beim nächsten Erfolg nachgeholt
 MONTH="$(date +%Y-%m)"
-[[ -d "$DEST/monthly/$MONTH" ]] || cp -al "$DEST/daily/$NAME" "$DEST/monthly/$MONTH"
+[[ "$KEEP_MONTHLY" -eq 0 || -d "$DEST/monthly/$MONTH" ]] || cp -al "$DEST/daily/$NAME" "$DEST/monthly/$MONTH"
 
-# Alte Snapshots löschen, unfertige Reste ebenfalls (die Anzahl ist oben auf >= 1 geprüft)
+# Alte Snapshots löschen (älter als KEEP_DAYS Tage; der neueste bleibt immer), unfertige Reste ebenfalls
 rm -rf "$DEST"/daily/*.partial
-ls -1d "$DEST"/daily/*   2>/dev/null | sort | head -n -"$KEEP_DAILY"   | xargs -r rm -rf
-ls -1d "$DEST"/monthly/* 2>/dev/null | sort | head -n -"$KEEP_MONTHLY" | xargs -r rm -rf
+CUTOFF="$(date -d "-$KEEP_DAYS days" +%Y-%m-%d_%H%M%S)"
+NEWEST="$(ls -1d "$DEST"/daily/* 2>/dev/null | sort | tail -n 1 || true)"
+for d in "$DEST"/daily/*; do
+  [[ -d "$d" && "$d" != "$NEWEST" && "${d##*/}" < "$CUTOFF" ]] || continue
+  echo "Lösche alte Sicherung: ${d##*/}"
+  rm -rf "$d"
+done
+if [[ "$KEEP_MONTHLY" -eq 0 ]]; then
+  rm -rf "$DEST"/monthly/*
+else
+  ls -1d "$DEST"/monthly/* 2>/dev/null | sort | head -n -"$KEEP_MONTHLY" | xargs -r rm -rf
+fi
 
 trap - EXIT
 echo "[$(date '+%F %T')] Fertig."

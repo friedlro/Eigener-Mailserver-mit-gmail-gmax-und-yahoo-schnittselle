@@ -61,7 +61,7 @@ sudo ./backup-mail.sh /mnt/backup/mail
 
 | Punkt | Wert |
 |---|---|
-| Aufbewahrung | 14 Tages- und 6 Monats-Snapshots (`KEEP_DAILY`, `KEEP_MONTHLY`, mindestens 1) |
+| Aufbewahrung | Sicherungen älter als 7 Tage werden bei jedem Lauf automatisch gelöscht (`KEEP_DAYS`, mindestens 1). Der neueste Snapshot bleibt immer. Monatssnapshots nur mit `KEEP_MONTHLY=n` (Standard 0). |
 | Struktur | `daily/<Datum>/`, `monthly/<Jahr-Monat>/`, `latest` zeigt auf den neuesten Stand |
 | Schutz | bricht ab, wenn das Ziel auf demselben Laufwerk wie die Mails oder innerhalb des Mailserver-Ordners liegt |
 | Laufwerk eingehängt? | `REQUIRE_MOUNT=1` bricht ab, wenn das Ziel kein eigener Mountpunkt ist |
@@ -70,7 +70,7 @@ sudo ./backup-mail.sh /mnt/backup/mail
 | Monitoring | `HC_URL=https://hc-ping.com/xxxx` meldet Start, Erfolg und jeden Fehler an Healthchecks.io |
 
 Die Variablen werden mit `--install` in die Cron-Zeile übernommen, z. B.
-`sudo KEEP_DAILY=30 REQUIRE_MOUNT=1 HC_URL=https://hc-ping.com/xxxx ./backup-mail.sh --install /mnt/backup/mail`.
+`sudo KEEP_DAYS=30 REQUIRE_MOUNT=1 HC_URL=https://hc-ping.com/xxxx ./backup-mail.sh --install /mnt/backup/mail`.
 
 **Wiederherstellen** (Beispiel: ein Postfach):
 

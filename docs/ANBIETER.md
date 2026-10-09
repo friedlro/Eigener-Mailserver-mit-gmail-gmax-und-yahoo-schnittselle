@@ -14,7 +14,7 @@ Jedes Konto wird einmalig beim Anbieter vorbereitet, **bevor** der Mailserver zu
 |---|---|---|---|
 | Passwort für den Mailserver | **App-Passwort** (16 Buchstaben) | GMX-Passwort (bei Zwei-Faktor: Passwort für externe Programme, falls GMX eines verlangt) | **App-Passwort** |
 | Freischaltung nötig | IMAP und POP in den Gmail-Einstellungen | **POP3 und IMAP in den GMX-Einstellungen** | keine (POP und IMAP stehen zur Verfügung) |
-| IMAP (Import) | `imap.gmail.com:993` | `imap.gmx.net:993` (`.com`-Konten: `imap.gmx.com`) | `imap.mail.yahoo.com:993` |
+| IMAP (Import) | `imap.gmail.com:993` | `imap.gmx.net:993` (gilt auch für gmx.at und gmx.ch; `.com`-Konten: `imap.gmx.com`) | `imap.mail.yahoo.com:993` |
 | POP3 (laufende Abholung) | `pop.gmail.com:995` | `pop.gmx.net:995` (`.com`: `pop.gmx.com`) | `pop.mail.yahoo.com:995` |
 | SMTP (Senden) | `smtp.gmail.com:587` STARTTLS | `mail.gmx.net:587` STARTTLS (`.com`: `mail.gmx.com`) | `smtp.mail.yahoo.com:587` STARTTLS |
 | Benutzername | volle Adresse | volle Adresse | volle Adresse |

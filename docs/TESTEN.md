@@ -22,7 +22,7 @@ sondern auf einem Entwicklungsrechner oder in einer Test-VM.
 | Fehleingaben | unbekannte Domain, Anbieter, Einstellung, ungültige Tokens, Domain, Bind-Adresse, Image-Tag, keine Konten |
 | Domain und Tunnel | Let's Encrypt, DDNS und Tunnel; Token nur in `.env`; Cron mit festem Tag |
 | Installationsassistent | komplette Dialogfolge mit Fehleingabe und Anbieter-Abgleich; die erzeugte `accounts.conf` versteht `setup-mailserver.sh` |
-| Backup | Ablehnung von `KEEP_DAILY=0`, Ziel in der Quelle, gleiches Laufwerk, Parallellauf; Snapshots, Rotation, `latest`, Rechte, Cron-Zeile, logrotate |
+| Backup | Ablehnung von `KEEP_DAYS=0`, Ziel in der Quelle, gleiches Laufwerk, Parallellauf; Snapshots, Löschen alter Snapshots nach KEEP_DAYS, `latest`, Rechte, Cron-Zeile, logrotate |
 | Deinstallation | entfernt Konfiguration, Cron und Container, **lässt `data/` ohne ausdrückliche Auswahl unberührt** |
 
 ## Was die automatischen Tests nicht abdecken
