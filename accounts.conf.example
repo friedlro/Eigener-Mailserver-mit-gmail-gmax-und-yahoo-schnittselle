@@ -1,0 +1,79 @@
+# Kopieren nach accounts.conf und ausfüllen:  cp accounts.conf.example accounts.conf
+# (oder einfach ./install.sh starten, der Assistent schreibt die Datei für Sie)
+# Zeilen mit # werden ignoriert. Rechte der fertigen Datei: chmod 600 accounts.conf
+
+# ---------------------------------------------------------------------------
+# KONTEN (Pflicht), eine Zeile pro Konto:
+#   adresse | passwort | lokaler-name | lokales-passwort | quota | anbieter
+# Nur die ersten zwei Felder sind Pflicht.
+#   adresse:           die Adresse beim Anbieter (Gmail, GMX oder Yahoo)
+#   passwort:          Gmail und Yahoo: App-Passwort. GMX: GMX-Passwort (POP3/IMAP muss freigeschaltet sein)
+#   lokaler-name:      leer = Teil vor dem @ der Adresse
+#   lokales-passwort:  leer = wird automatisch erzeugt (steht danach in zugangsdaten.txt)
+#                      Kein Senkrechtstrich (|) in Passwörtern verwenden.
+#   quota:             leer = unbegrenzt, sonst z. B. 10G
+#   anbieter:          gmail, gmx oder yahoo. Leer = wird aus der Adresse erkannt
+#                      (gmail.com, googlemail.com, gmx.*, yahoo.*, ymail.com, rocketmail.com)
+# Die folgenden Zeilen sind nur Beispiele: ersetzen Sie sie durch Ihre Konten.
+# ---------------------------------------------------------------------------
+anna@gmail.com|abcd efgh ijkl mnop|anna
+ben@gmx.de|MeinGmxPasswort|ben||10G
+clara@yahoo.com|qrst uvwx yzab cdef|clara
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: Importmodus (gilt nur für Gmail-Konten)
+#   ordner = Gmail-Labels werden zu Ordnern (Standard)
+#   alles  = nur "Alle Nachrichten": vollständig, aber ohne Ordnerstruktur
+# Bei GMX und Yahoo werden alle Ordner außer Posteingang, Papierkorb und Spam importiert;
+# der Posteingang kommt dort über die laufende POP3-Abholung.
+# ---------------------------------------------------------------------------
+# IMPORT_MODE=ordner
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: Externer Zugriff ohne VPN (Domain bei Cloudflare nötig)
+#
+# A) Mailclients direkt (Port 993/587 im Router weiterleiten):
+#    DOMAIN, CF_API_TOKEN und LE_EMAIL setzen. Das Skript holt ein
+#    Let's-Encrypt-Zertifikat und hält die DNS-Adresse mail.<DOMAIN> aktuell.
+#    CF_API_TOKEN: Cloudflare > Mein Profil > API-Tokens > Vorlage "Edit zone DNS"
+#
+# B) Webmail ohne Portfreigabe über Cloudflare Tunnel:
+#    CF_TUNNEL_TOKEN setzen (Zero Trust > Networks > Tunnels > Tunnel erstellen,
+#    Token aus dem Docker-Befehl kopieren).
+#
+# Beides lässt sich kombinieren.
+# ---------------------------------------------------------------------------
+# DOMAIN=deinedomain.at
+# CF_API_TOKEN=
+# LE_EMAIL=deine@mail.at
+# CF_TUNNEL_TOKEN=
+# DDNS=1
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: Webmail (Roundcube)
+#   WEBMAIL_PORT  Port auf dem Server (Standard 8080)
+#   WEBMAIL_BIND  0.0.0.0 = erreichbar im Heimnetz (Standard)
+#                 127.0.0.1 = nur auf dem Server selbst (z. B. hinter Cloudflare Tunnel)
+# Die Webmail läuft ohne Verschlüsselung (HTTP): nur in vertrauenswürdigen Netzen öffnen.
+# ---------------------------------------------------------------------------
+# WEBMAIL_PORT=8080
+# WEBMAIL_BIND=0.0.0.0
+# TIMEZONE=Europe/Vienna
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: Gmail automatisch aufräumen (löscht bei Google ENDGÜLTIG!)
+# Gilt nur für Gmail-Konten. Erst aktivieren, wenn Import und Backup nachweislich laufen.
+# Täglicher Job um 04:45 Uhr; von Hand: ./setup-mailserver.sh --cleanup
+# ---------------------------------------------------------------------------
+# GMAIL_EMPTY_TRASH=1    # Papierkorb leeren
+# GMAIL_TRASH_DAYS=30    # nur Mails älter als N Tage (0 = alle)
+# GMAIL_EMPTY_SPAM=0     # 1 = auch Spam leeren
+# GMAIL_EMPTY_SENT=0     # 1 = "Gesendet" in den Papierkorb verschieben
+# GMAIL_SENT_DAYS=30     # nur Mails älter als N Tage (0 = alle)
+
+# ---------------------------------------------------------------------------
+# OPTIONAL (Fortgeschrittene): andere Image-Versionen als die getesteten
+# Standard: DMS_TAG=16.0.1  ROUNDCUBE_TAG=1.7.4-apache  DDNS_TAG=1.17.1
+#           CLOUDFLARED_TAG=2026.10.0  CERTBOT_TAG=v5.8.0
+# ---------------------------------------------------------------------------
+# DMS_TAG=16.0.1

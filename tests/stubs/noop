@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Platzhalter für Programme, die im Test nichts tun dürfen (chown, chgrp, apt-get, tailscale, systemctl ...).
+printf '%s %s\n' "$(basename "$0")" "$*" >> "${STUB_LOG:-/dev/null}.noop"
+exit 0

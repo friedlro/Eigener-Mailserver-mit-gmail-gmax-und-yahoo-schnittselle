@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Test-Platzhalter für docker: startet nichts, protokolliert nur und spielt die nötigsten Antworten nach.
+LOG="${STUB_LOG:?STUB_LOG fehlt}"
+printf 'docker %s\n' "$*" >> "$LOG.args"          # alle Argumente (Test: darin dürfen keine Passwörter stehen)
+case "${1:-}" in
+  compose)
+    [[ "${2:-}" == "version" ]] && echo "Docker Compose version stub"
+    exit 0 ;;
+  exec)
+    [[ "$*" == *"supervisorctl status dovecot"* ]] && echo "dovecot  RUNNING"
+    exit 0 ;;
+  ps) exit 0 ;;
+  images) exit 0 ;;
+  run)
+    cfg=""; mb=""
+    for a in "$@"; do
+      case "$a" in
+        *:/tmp/docker-mailserver) cfg="${a%%:/tmp/docker-mailserver}" ;;
+        *:/root/.mbsyncrc:ro)     mb="${a%%:/root/.mbsyncrc:ro}" ;;
+      esac
+    done
+    if [[ "$*" == *"setup email add"* ]]; then
+      IFS= read -r pw
+      printf '%s|{SHA512-CRYPT}stub\n' "${*: -1}" >> "$cfg/postfix-accounts.cf"
+      printf '%s\n' "${#pw}" >> "$LOG.pwlen"        # nur die Länge, nie das Passwort selbst
+      exit 0
+    fi
+    if [[ -n "$mb" ]]; then
+      cp "$mb" "$LOG.mbsync.$(date +%s%N)"
+      exit 0
+    fi
+    exit 0 ;;
+esac
+exit 0

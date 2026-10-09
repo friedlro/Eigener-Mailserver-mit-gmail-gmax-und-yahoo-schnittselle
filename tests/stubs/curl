@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test-Platzhalter für curl (nur für ./setup-mailserver.sh --check): entscheidet nach dem Benutzernamen.
+#   bad@...  -> Anmeldung abgelehnt (67)     down@... -> Server nicht gefunden (6)     sonst OK
+cfg="$(cat)"                                   # Konfiguration von "-K -"
+url=""
+for a in "$@"; do case "$a" in imaps://*|pop3s://*) url="$a" ;; esac; done
+echo "$url" >> "${STUB_LOG:?}.curl"
+case "$cfg" in
+  *'bad@'*)  exit 67 ;;
+  *'down@'*) exit 6 ;;
+esac
+exit 0

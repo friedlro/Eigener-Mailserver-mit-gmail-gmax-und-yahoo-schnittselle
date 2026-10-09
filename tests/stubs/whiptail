@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test-Platzhalter für whiptail: liest die Antworten der Reihe nach aus der Datei $WT_ANSWERS.
+#   Hinweisfenster (--msgbox) brauchen keine Antwort.
+#   Ja/Nein-Fenster: Zeile "Y" = Ja, alles andere = Nein.
+#   Eingabe-, Passwort- und Auswahlfenster: die Zeile wird als Ergebnis ausgegeben.
+Q="${WT_ANSWERS:?WT_ANSWERS fehlt}"
+kind=""
+for a in "$@"; do
+  case "$a" in --msgbox|--yesno|--inputbox|--passwordbox|--menu|--checklist) kind="$a" ;; esac
+done
+printf '[%s] %s\n' "$kind" "$(printf '%s ' "$@" | cut -c1-110)" >> "${Q}.log"
+[[ "$kind" == "--msgbox" ]] && exit 0
+if [[ ! -s "$Q" ]]; then echo "WT_ANSWERS leer: $kind" >> "${Q}.log"; exit 1; fi
+ans="$(head -n1 "$Q")"; sed -i '1d' "$Q"
+case "$kind" in
+  --yesno) [[ "$ans" == "Y" ]] && exit 0 || exit 1 ;;
+  *) printf '%s' "$ans" >&2; exit 0 ;;
+esac

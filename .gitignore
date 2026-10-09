@@ -1,0 +1,14 @@
+# Geheimnisse und Laufzeitdaten: gehören nie ins Repository
+accounts.conf
+accounts.conf.bak-*
+.env
+zugangsdaten.txt
+docker-compose.yml
+docker-compose.yml.vor-update
+config-backup/
+data/
+
+# Logs und temporäre Dateien
+*.log
+*.tmp
+*.swp
