@@ -198,7 +198,7 @@ sudo ./backup-mail.sh --install /mnt/backup/mail
 | `./setup-mailserver.sh --check` | Zugangsdaten aller Konten testen (IMAP und POP3). Ändert nichts. |
 | `./setup-mailserver.sh --update` | Bestehendes System aktualisieren: neue Konfiguration und Container, **kein** Import, die Abholung läuft weiter. Die bisherige Konfiguration wird vorher gesichert. |
 | `./setup-mailserver.sh --reimport` | Import erzwingen, z. B. nach einem abgebrochenen alten Import. |
-| `./setup-mailserver.sh --cleanup` | Gmail aufräumen nach den Einstellungen in `accounts.conf`. |
+| `./setup-mailserver.sh --cleanup` | Beim Anbieter aufräumen (Posteingang, Spam, Papierkorb je Anbieter) nach `accounts.conf`. Mit `--dry-run` nur zählen. |
 | `./setup-mailserver.sh --empty-trash` | Gmail-Papierkorb sofort leeren. |
 | `-y` | Ohne Rückfrage, mit jedem Modus kombinierbar. |
 
@@ -250,7 +250,7 @@ Eine Einstellung pro Zeile, `NAME=Wert`, **keine Leerzeichen vor dem Namen oder 
 | `WEBMAIL_PORT` | `8080` | Port, auf dem Roundcube erreichbar ist. |
 | `WEBMAIL_BIND` | `0.0.0.0` | `0.0.0.0` = Heimnetz, `127.0.0.1` = nur der Server selbst (z. B. hinter Tunnel). |
 | `TIMEZONE` | Systemzeit | z. B. `Europe/Vienna` |
-| `GMAIL_EMPTY_TRASH`, `GMAIL_TRASH_DAYS`, `GMAIL_EMPTY_SPAM`, `GMAIL_EMPTY_SENT`, `GMAIL_SENT_DAYS` | aus | Gmail automatisch aufräumen, nur Gmail ([docs/BETRIEB.md](docs/BETRIEB.md)). |
+| `CLEAN_INBOX`, `CLEAN_SPAM`, `CLEAN_TRASH`, `CLEAN_DAYS`, `GMAIL_EMPTY_SENT`, `GMAIL_SENT_DAYS` | aus | Mails beim Anbieter löschen, je Anbieter wählbar (`gmail,gmx,yahoo` oder `alle`) ([docs/BETRIEB.md](docs/BETRIEB.md)). |
 | `DMS_TAG`, `ROUNDCUBE_TAG`, `DDNS_TAG`, `CLOUDFLARED_TAG`, `CERTBOT_TAG` | getestete Versionen | Andere Image-Versionen erzwingen (Fortgeschrittene). |
 
 Let's Encrypt und DDNS werden nur aktiv, wenn **`DOMAIN`, `CF_API_TOKEN` und `LE_EMAIL`** alle gesetzt sind. Sonst läuft der Server lokal mit
@@ -296,6 +296,7 @@ Fehlersuche-Tabelle: [docs/BETRIEB.md](docs/BETRIEB.md).
 docker compose ps                         # Status
 sudo ./setup-mailserver.sh --check        # Zugangsdaten bei den Anbietern testen
 sudo ./backup-mail.sh --install /mnt/backup/mail   # tägliches Backup 03:30 Uhr
+sudo ./usb-backup.sh --setup /dev/sdb1     # oder: USB-Stick als Backup-Ziel einrichten (auch in der Web-Oberfläche), siehe docs/BETRIEB.md
 sudo ./setup-mailserver.sh --update       # nach einer neuen Projektversion
 ```
 

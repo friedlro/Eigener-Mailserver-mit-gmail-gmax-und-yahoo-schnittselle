@@ -1,0 +1,15 @@
+{"blockdevices": [
+  {"name":"nvme0n1","path":"/dev/nvme0n1","size":512110190592,"model":"Samsung SSD","vendor":null,"tran":"nvme","rm":false,"hotplug":false,"fstype":null,"label":null,"uuid":null,"type":"disk","mountpoints":[null],
+   "children":[
+     {"name":"nvme0n1p1","path":"/dev/nvme0n1p1","size":536870912,"fstype":"vfat","label":null,"uuid":"AAAA-1111","type":"part","mountpoints":["/boot/efi"],"tran":null,"rm":false,"hotplug":false},
+     {"name":"nvme0n1p2","path":"/dev/nvme0n1p2","size":511000000000,"fstype":"ext4","label":null,"uuid":"sys-uuid","type":"part","mountpoints":["/"],"tran":null,"rm":false,"hotplug":false}]},
+  {"name":"sda","path":"/dev/sda","size":2000398934016,"model":"WD Red","vendor":"ATA     ","tran":"sata","rm":false,"hotplug":false,"fstype":null,"label":null,"uuid":null,"type":"disk","mountpoints":[null],
+   "children":[{"name":"sda1","path":"/dev/sda1","size":2000000000000,"fstype":"ext4","label":"daten","uuid":"int-uuid","type":"part","mountpoints":[null],"tran":null,"rm":false,"hotplug":false}]},
+  {"name":"sdb","path":"/dev/sdb","size":64023257088,"model":"Cruzer Blade","vendor":"SanDisk ","tran":"usb","rm":true,"hotplug":true,"fstype":null,"label":null,"uuid":null,"type":"disk","mountpoints":[null],
+   "children":[
+     {"name":"sdb1","path":"/dev/sdb1","size":32000000000,"fstype":"ext4","label":"MAILBACKUP","uuid":"1111-2222-aaaa","type":"part","mountpoints":["/media/roland/MAILBACKUP"],"tran":null,"rm":true,"hotplug":true},
+     {"name":"sdb2","path":"/dev/sdb2","size":32000000000,"fstype":"ntfs","label":"WIN","uuid":"3333","type":"part","mountpoints":[null],"tran":null,"rm":true,"hotplug":true}]},
+  {"name":"sdc","path":"/dev/sdc","size":16000000000,"model":"Leerer Stick","vendor":"Kingston","tran":"usb","rm":true,"hotplug":true,"fstype":null,"label":null,"uuid":null,"type":"disk","mountpoints":[null]},
+  {"name":"sdd","path":"/dev/sdd","size":128000000000,"model":"Boot Stick","vendor":"USB","tran":"usb","rm":true,"hotplug":true,"fstype":null,"label":null,"uuid":null,"type":"disk","mountpoints":[null],
+   "children":[{"name":"sdd1","path":"/dev/sdd1","size":127000000000,"fstype":"ext4","label":"root","uuid":"boot-usb","type":"part","mountpoints":["/"],"tran":null,"rm":true,"hotplug":true}]}
+]}

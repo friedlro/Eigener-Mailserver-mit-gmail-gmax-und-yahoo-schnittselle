@@ -30,7 +30,7 @@ Bei anderen Domains tragen Sie den Anbieter im sechsten Feld der Kontozeile ein 
 | Posteingang | nur neue Mails per POP3 ("ab jetzt eingehende") | der **gesamte Posteingang** kommt per POP3 und wird dabei beim Anbieter gelöscht |
 | Laufende Abholung | POP3, alle 5 Minuten, mit Löschen beim Anbieter | wie Gmail |
 | Senden | über den SMTP-Server des Anbieters mit dem eigenen Konto | wie Gmail |
-| Gmail aufräumen (Papierkorb, Gesendet) | möglich (Abschnitt "Betrieb") | **nicht vorgesehen** |
+| Aufräumen beim Anbieter (Posteingang, Spam, Papierkorb) | je Anbieter wählbar (Abschnitt "Betrieb") | je Anbieter wählbar (Abschnitt "Betrieb") |
 
 Der Posteingang von GMX und Yahoo wird absichtlich nicht per IMAP importiert. Sonst käme jede Mail ein zweites Mal
 per POP3. Bei einem großen Posteingang dauert dafür die erste Abholung länger.

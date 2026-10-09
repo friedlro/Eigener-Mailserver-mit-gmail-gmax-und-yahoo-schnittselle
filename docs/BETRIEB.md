@@ -59,6 +59,26 @@ sudo ./backup-mail.sh --install /mnt/backup/mail
 sudo ./backup-mail.sh /mnt/backup/mail
 ```
 
+### Backup auf einen USB-Stick oder eine USB-Platte (geführt)
+
+In der Web-Oberfläche (Karte „Backup auf USB-Datenträger“) oder auf der Kommandozeile:
+
+```bash
+sudo ./usb-backup.sh --list                      # angeschlossene USB-Datenträger anzeigen
+sudo ./usb-backup.sh --setup /dev/sdb1           # vorhandenes ext4/xfs/btrfs weiterverwenden (löscht nichts)
+sudo ./usb-backup.sh --setup /dev/sdb1 --format  # ALLES löschen und als ext4 neu anlegen
+sudo ./usb-backup.sh --remove                    # Cron und fstab-Eintrag entfernen (Daten auf dem Stick bleiben)
+```
+
+Das Skript hängt den Datenträger per UUID nach `/mnt/mail-backup` ein (fstab mit `nofail`: der Server startet auch ohne Stick), richtet den
+täglichen Job (03:30 Uhr) ein und startet auf Wunsch gleich die erste Sicherung im Hintergrund. Sicherungen älter als `--keep-days`
+(Standard 7) werden automatisch gelöscht.
+
+**Schutzregeln:** Angeboten werden nur USB-/Wechseldatenträger, nie die Systemplatte, nie ein Datenträger mit eingehängtem `/`, `/boot`,
+`/home`, `/var` oder Swap. Dateisysteme ohne Hardlinks und Unix-Rechte (NTFS, exFAT, FAT) werden nur nach ausdrücklichem Formatieren
+genommen; die Web-Oberfläche verlangt dafür, den Gerätenamen zur Bestätigung einzutippen. Der Job läuft mit `REQUIRE_MOUNT=1`: Fehlt
+der Stick, wird nichts auf die Systemplatte geschrieben, und das Backup meldet einen Fehler. Stick ziehen: erst `sudo umount /mnt/mail-backup`.
+
 | Punkt | Wert |
 |---|---|
 | Aufbewahrung | Sicherungen älter als 7 Tage werden bei jedem Lauf automatisch gelöscht (`KEEP_DAYS`, mindestens 1). Der neueste Snapshot bleibt immer. Monatssnapshots nur mit `KEEP_MONTHLY=n` (Standard 0). |
@@ -92,29 +112,40 @@ Besitzer und Rechte stellt `rsync` selbst wieder her.
 - **Läuft der Server in einer Proxmox-VM oder einem LXC:** zusätzlich ein Proxmox-Backup.
 - **Teste die Wiederherstellung einmal**, bevor du beim Anbieter etwas löschst.
 
-## Gmail aufräumen (nur Gmail-Konten)
+## Mails beim Anbieter löschen (Gmail, GMX, Yahoo)
 
-**Neue Mails:** werden bei der Abholung automatisch beim Anbieter gelöscht.
+**Neue Mails:** werden bei der Abholung (POP3) automatisch beim Anbieter gelöscht.
 
 **Altbestand:** Der Import löscht nichts beim Anbieter. Vorgehen nach der Kontrolle:
 1. Stichproben im Mailprogramm prüfen
 2. Backup durchführen
-3. In Gmail suchen mit `older_than:1d`, alles markieren, löschen, Papierkorb leeren
+3. Aufräumen aktivieren (unten) oder von Hand beim Anbieter löschen
 
-**Automatisch durch das Skript (optional):** Sobald `GMAIL_EMPTY_TRASH=1` oder `GMAIL_EMPTY_SENT=1` in `accounts.conf` steht, richtet
-`setup-mailserver.sh` einen täglichen Cron-Job ein (04:45 Uhr, Log: `/var/log/mail-gmail-cleanup.log`). Er löscht bei Gmail
-**endgültig** und findet Papierkorb, Spam und Gesendet über die IMAP-Kennzeichen, also unabhängig von der Sprache.
+**Automatisch durch das Skript (optional, je Anbieter wählbar):** In der Web-Oberfläche (Karte „Mails beim Anbieter löschen“) oder in
+`accounts.conf` wählst du je Anbieter, ob Posteingang, Spam und Papierkorb geleert werden. Das richtet einen täglichen Cron-Job ein
+(04:45 Uhr, Log: `/var/log/mail-gmail-cleanup.log`). Gelöscht wird **endgültig** beim Anbieter.
 
 ```
-GMAIL_EMPTY_TRASH=1
-GMAIL_TRASH_DAYS=30
+CLEAN_INBOX=gmx,yahoo
+CLEAN_SPAM=alle
+CLEAN_TRASH=alle
+CLEAN_DAYS=7
 GMAIL_EMPTY_SENT=1
 GMAIL_SENT_DAYS=30
 ```
 
-Schutz: Ein Konto wird übersprungen, solange lokal noch keine Mails liegen. "Gesendet" wird zusätzlich nur bereinigt, wenn der Import
-des Kontos abgeschlossen ist. Von Hand: `./setup-mailserver.sh --cleanup` oder `--empty-trash`. Für GMX und Yahoo gibt es dieses
-Aufräumen nicht.
+**Schutzregeln:**
+- **Posteingang:** gelöscht wird nur, was lokal nachweislich gespeichert ist. Das Skript vergleicht die Message-ID jeder Mail mit dem lokalen
+  Mailordner. Mails ohne Message-ID oder ohne lokale Kopie bleiben beim Anbieter. Bei Gmail gehen die Mails zuerst in den Papierkorb
+  (sonst würde IMAP nur das Label entfernen) und werden dort mit `CLEAN_TRASH` endgültig gelöscht.
+- **Spam und Papierkorb** werden nie importiert und deshalb ohne Abgleich geleert.
+- Ein Konto wird übersprungen, solange lokal noch keine Mails liegen. Der Gmail-Posteingang und „Gesendet“ werden erst nach
+  abgeschlossenem Import bereinigt.
+- Ordner werden über die IMAP-Kennzeichen (Trash, Junk) und, wenn der Anbieter keine liefert, über Namen gefunden (Papierkorb, Spam, Bulk Mail …).
+  Wird ein Ordner nicht gefunden, bleibt er unberührt und das Skript meldet es.
+
+**Vorher ansehen, was gelöscht würde (ändert nichts):** `sudo ./setup-mailserver.sh --cleanup --dry-run`.
+Von Hand sofort: `./setup-mailserver.sh --cleanup` (nach der Konfiguration) oder `--empty-trash` (Papierkorb bei allen Anbietern).
 
 ## Fehlersuche
 

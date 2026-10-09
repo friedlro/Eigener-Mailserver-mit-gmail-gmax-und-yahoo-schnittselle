@@ -29,12 +29,16 @@ def free_port():
 
 tmp = tempfile.mkdtemp()
 shutil.copy(os.path.join(ROOT, "webui.py"), tmp)
+shutil.copy(os.path.join(ROOT, "usbdisks.py"), tmp)
 fake = os.path.join(tmp, "setup-mailserver.sh")
 with open(fake, "w") as f:
     f.write('#!/usr/bin/env bash\necho "Platzhalter: $*"\nprintf "\\033[1m==> fertig\\033[0m\\n"\ncat accounts.conf > seen.conf\n'
             'echo "anna@home.lan: Geheim123" > zugangsdaten.txt\n[[ "$1" == "--check" ]] && exit 3\nexit 0\n')
 port = free_port()
-env = dict(os.environ, MAILSERVER_SETUP=fake, WEBUI_ALLOW_NONROOT="1", WEBUI_PASSWORD="testpw12345")
+fakeusb = os.path.join(tmp, "usb-backup.sh")
+with open(fakeusb, "w") as f:
+    f.write('#!/usr/bin/env bash\necho "USB-Platzhalter: $*"\nexit ${USB_RC:-0}\n')
+env = dict(os.environ, MAILSERVER_USB=fakeusb, USBDISKS_LSBLK_JSON=os.path.join(ROOT, "tests", "fixtures", "lsblk.json"), MAILSERVER_SETUP=fake, WEBUI_ALLOW_NONROOT="1", WEBUI_PASSWORD="testpw12345")
 proc = subprocess.Popen([sys.executable, "-I", os.path.join(tmp, "webui.py"), "--bind", "127.0.0.1", "--port", str(port)],
                         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 for _ in range(50):
@@ -114,8 +118,11 @@ try:
     check("Gmail-Zeile mit kleingeschriebener Quota", "anna@gmail.com|abcd efgh ijkl mnop|anna||10G" in text)
     check("Optionen stehen in der Datei", "WEBMAIL_PORT=8080" in text and "WEBMAIL_BIND=0.0.0.0" in text and "IMPORT_MODE=ordner" in text)
 
+    st, body, _ = run(dict(good, options=dict(good["options"], cleanup={"inbox": ["hotmail"], "days": "x"})))
+    check("Aufräumen: ungültiger Anbieter und ungültige Tage werden abgelehnt", st == 400 and "Anbieterauswahl" in " ".join(json.loads(body)["errors"]))
     time.sleep(0.2)
-    st, _, _ = run(dict(good, action="install"))
+    clean_opts = {"inbox": ["yahoo", "gmx"], "spam": ["gmail", "gmx", "yahoo"], "trash": ["gmail"], "days": "7", "gmail_sent": True, "sent_days": "14"}
+    st, _, _ = run(dict(good, action="install", options=dict(good["options"], cleanup=clean_opts)))
     time.sleep(0.5)
     baks = [f for f in os.listdir(tmp) if f.startswith("accounts.conf.bak-")]
     check("vorhandene accounts.conf wird gesichert (600)", len(baks) == 1 and stat.S_IMODE(os.stat(os.path.join(tmp, baks[0])).st_mode) == 0o600)
@@ -126,8 +133,59 @@ try:
         time.sleep(0.1)
     j = json.loads(body)
     check("Installation: Skript mit -y gestartet, Exit-Code 0", "Platzhalter: -y" in j["lines"] and j["rc"] == 0)
+    text = open(conf).read()
+    check("Aufräumen: Auswahl je Anbieter steht in accounts.conf", all(x in text for x in (
+        "CLEAN_INBOX=gmx,yahoo", "CLEAN_SPAM=gmail,gmx,yahoo", "CLEAN_TRASH=gmail", "CLEAN_DAYS=7", "GMAIL_EMPTY_SENT=1", "GMAIL_SENT_DAYS=14")))
     st, body, _ = req("GET", "/api/creds", cookie=cookie)
     check("Zugangsdaten sind nach Anmeldung abrufbar", st == 200 and "Geheim123" in body)
+    # --- Backup auf USB-Datenträger
+    st, body, _ = req("GET", "/api/devices", cookie=cookie)
+    devs = json.loads(body)["devices"] if st == 200 else []
+    check("Datenträgerliste: nur USB-Datenträger, nie Systemplatte", [d["path"] for d in devs] == ["/dev/sdb1", "/dev/sdb2", "/dev/sdc"])
+    check("Datenträgerliste: Dateisystem-Eignung wird angezeigt", [d["keeps_data"] for d in devs] == [True, False, False])
+    check("Datenträgerliste ohne Anmeldung gesperrt", req("GET", "/api/devices")[0] == 401)
+
+    def bk(**kw):
+        b = {"enabled": True, "device": "/dev/sdb1", "keep_days": "7", "first_run": True}
+        b.update(kw)
+        return dict(good, action="install", options=dict(good["options"], backup=b))
+
+    def errs(payload):
+        st, body, _ = run(payload)
+        return st, " ".join(json.loads(body).get("errors", [])) if st == 400 else ""
+
+    def finish():
+        j = {}
+        for _ in range(60):
+            _, body, _ = req("GET", "/api/log?from=0", cookie=cookie)
+            j = json.loads(body)
+            if j["done"]:
+                break
+            time.sleep(0.1)
+        return j
+
+    st, e = errs(bk(device="/dev/sda1"))
+    check("Backup: Systemplatte/internes Gerät wird abgelehnt", st == 400 and "USB-Datenträger" in e)
+    st, e = errs(bk(device="/dev/sdb1; rm -rf /"))
+    check("Backup: manipulierter Gerätename wird abgelehnt", st == 400)
+    st, e = errs(bk(device="/dev/sdb2"))
+    check("Backup: NTFS ohne Formatieren wird abgelehnt", st == 400 and "formatiert" in e)
+    st, e = errs(bk(device="/dev/sdc", format=True, confirm="falsch"))
+    check("Backup: Formatieren ohne Bestätigung wird abgelehnt", st == 400 and "Bestätigung" in e)
+    st, e = errs(bk(keep_days="0"))
+    check("Backup: ungültige Aufbewahrung wird abgelehnt", st == 400 and "Tagen" in e)
+    time.sleep(0.3)
+    st, _, _ = run(bk(format=False))
+    j = finish()
+    check("Backup: wird nach der Installation eingerichtet (ohne Formatieren)", st == 200 and "USB-Platzhalter: --setup /dev/sdb1 --keep-days 7 --first-run" in j["lines"] and j["rc"] == 0)
+    time.sleep(0.3)
+    st, _, _ = run(bk(device="/dev/sdc", format=True, confirm="/dev/sdc", first_run=False, keep_days="14"))
+    j = finish()
+    check("Backup: Formatieren nur mit Bestätigung, Aufbewahrung kommt an", st == 200 and "USB-Platzhalter: --setup /dev/sdc --keep-days 14 --format" in j["lines"])
+    time.sleep(0.3)
+    st, _, _ = run(dict(bk(), action="check"))
+    j = finish()
+    check("Backup: beim reinen Zugangsdaten-Test wird nichts eingerichtet", st == 200 and not any("USB-Platzhalter" in l for l in j["lines"]))
     st, _, _ = req("POST", "/api/quit", "{}", cookie=cookie, ctype="application/json")
     for _ in range(30):
         if proc.poll() is not None:

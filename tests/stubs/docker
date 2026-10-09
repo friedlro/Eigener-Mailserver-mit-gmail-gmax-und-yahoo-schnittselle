@@ -19,6 +19,10 @@ case "${1:-}" in
         *:/root/.mbsyncrc:ro)     mb="${a%%:/root/.mbsyncrc:ro}" ;;
       esac
     done
+    if [[ "$*" == *"/cleanup.py:ro"* ]]; then       # Aufräumen beim Anbieter: Einstellungen protokollieren (ohne Passwort)
+      { env | grep -E '^CL_' | grep -v '^CL_PASS=' | sort; printf 'CL_PASSLEN=%s\n' "${#CL_PASS}"; } > "$LOG.cleanup.$(date +%s%N)"
+      exit 0
+    fi
     if [[ "$*" == *"setup email add"* ]]; then
       IFS= read -r pw
       printf '%s|{SHA512-CRYPT}stub\n' "${*: -1}" >> "$cfg/postfix-accounts.cf"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test-Platzhalter für blkid, mkfs.ext4, mount, umount, mountpoint und systemctl: protokollieren nur.
+LOG="${STUB_LOG:?STUB_LOG fehlt}"
+n="$(basename "$0")"
+printf '%s %s\n' "$n" "$*" >> "$LOG.usb"
+case "$n" in
+  blkid) echo "${STUB_UUID:-1111-2222-aaaa}" ;;
+esac
+exit 0
