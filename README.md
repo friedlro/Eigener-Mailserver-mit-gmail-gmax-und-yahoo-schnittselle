@@ -66,10 +66,20 @@ Ohne git und ohne manuellen Download (ein Befehl, lädt das Projekt nach `/opt/m
 curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash
 ```
 
-Solange das Repository privat ist, geht das nur mit einem GitHub-Token (fein granular, nur Leserecht auf *Contents*):
+Solange das Repository privat ist, geht das nur mit einem GitHub-Token. Das Token legst du selbst an unter
+<https://github.com/settings/personal-access-tokens/new>: Repository-Zugriff *Only select repositories* (nur dieses Repository),
+Berechtigung *Contents: Read-only*, kurze Laufzeit. Nach der Installation unter
+<https://github.com/settings/personal-access-tokens> widerrufen. Das Token nie in Chats oder Dateien ablegen:
+
+```bash
+read -rs -p "Token: " GITHUB_TOKEN; echo
+```
+
+Danach:
 
 ```bash
 curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo env GITHUB_TOKEN="$GITHUB_TOKEN" bash
+unset GITHUB_TOKEN
 ```
 
 Alternativ mit git:
