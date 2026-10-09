@@ -1,0 +1,137 @@
+name: Tests
+
+# Läuft auf frischen, wegwerfbaren GitHub-Runnern (Ubuntu 24.04), nie auf einem echten Mailserver.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Skripttests und shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Werkzeuge installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck rsync
+      - name: tests/run-tests.sh
+        run: bash tests/run-tests.sh
+
+  integration:
+    name: Echte Installation mit Docker (Test-Konten)
+    runs-on: ubuntu-24.04
+    needs: unit
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: accounts.conf mit erfundenen Konten
+        run: |
+          # Die Anbieter-Konten sind erfunden: Import und Abholung scheitern an der Anmeldung (gewollt),
+          # alles andere (Container, lokale Konten, TLS, Webmail, Backup, Deinstallation) wird echt geprüft.
+          {
+            echo "WEBMAIL_PORT=8080"
+            echo "IMPORT_MODE=ordner"
+            echo "anna@gmail.com|abcdabcdabcdabcd|anna|LocalTest123|"
+            echo "ben@gmx.de|Erfunden123|ben|LocalTest456|"
+            echo "clara@yahoo.com|qrstuvwxyzabcdef|clara|LocalTest789|"
+          } > accounts.conf
+          chmod +x *.sh
+
+      - name: Installation (setup-mailserver.sh)
+        run: sudo ./setup-mailserver.sh -y
+
+      - name: Container laufen und .env ist gesichert
+        run: |
+          docker ps --format '{{.Names}} {{.Image}}'
+          docker ps --format '{{.Names}}' | grep -x mailserver
+          docker ps --format '{{.Names}}' | grep -x roundcube
+          test "$(stat -c %a .env)" = "640"
+          if grep -q ':latest' docker-compose.yml; then echo 'FEHLER: :latest in docker-compose.yml'; exit 1; fi
+          sudo test "$(stat -c %a data/config/fetchmail.cf)" = "600"
+          sudo test "$(stat -c %a data/config/postfix-sasl-password.cf)" = "600"
+
+      - name: Lokale Konten, IMAP und SMTP mit TLS
+        run: |
+          docker exec mailserver doveadm auth test anna@home.lan LocalTest123
+          docker exec mailserver doveadm auth test ben@home.lan LocalTest456
+          docker exec mailserver doveadm auth test clara@home.lan LocalTest789
+          if docker exec mailserver doveadm auth test anna@home.lan falsch; then echo 'FEHLER: falsches Passwort wurde akzeptiert'; exit 1; fi
+          echo | openssl s_client -connect 127.0.0.1:993 -brief 2>&1 | head -n 5
+          echo | openssl s_client -starttls smtp -connect 127.0.0.1:587 -brief 2>&1 | head -n 5
+
+      - name: Webmail antwortet
+        run: |
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ || true)"
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "HTTP $code"
+          test "$code" = "200"
+
+      - name: Roundcube prüft das selbst signierte Zertifikat (cafile statt verify_peer=false)
+        run: |
+          docker exec roundcube php -r '
+            $c = stream_context_create(["ssl" => ["cafile" => "/certs/cert.pem", "verify_peer" => true, "verify_peer_name" => true]]);
+            $s = @stream_socket_client("ssl://mail.home.lan:993", $e, $m, 10, STREAM_CLIENT_CONNECT, $c);
+            echo $s ? "TLS-Verbindung mit Prüfung: OK\n" : "FEHLER: $m\n";
+            exit($s ? 0 : 1);'; then echo 'FEHLER: Verbindung ohne vertrauenswürdiges Zertifikat wurde akzeptiert'; exit 1; fi
+          # und ohne das Zertifikat muss die Prüfung scheitern
+          if docker exec roundcube php -r '
+            $c = stream_context_create(["ssl" => ["verify_peer" => true, "verify_peer_name" => true]]);
+            $s = @stream_socket_client("ssl://mail.home.lan:993", $e, $m, 10, STREAM_CLIENT_CONNECT, $c);
+            exit($s ? 0 : 1);'; then echo 'FEHLER: Verbindung ohne vertrauenswürdiges Zertifikat wurde akzeptiert'; exit 1; fi
+
+      - name: fetchmail liest die Konfiguration (Abholung läuft, Anmeldung scheitert wie erwartet)
+        run: |
+          sleep 20
+          docker exec mailserver sh -c 'ps aux | grep -v grep | grep -c fetchmail' || true
+          docker logs mailserver 2>&1 | grep -i fetchmail | tail -n 10 || true
+          if docker logs mailserver 2>&1 | grep -iE 'fetchmail.*(syntax|parse|unknown keyword)'; then echo 'FEHLER: fetchmail kann die Konfiguration nicht lesen'; exit 1; fi
+
+      - name: Zweiter Lauf (keine Dubletten) und Update
+        run: |
+          sudo ./setup-mailserver.sh -y 2>&1 | tee second.log
+          test "$(grep -c 'existiert bereits' second.log)" -eq 3
+          sudo ./setup-mailserver.sh --update -y
+          grep -q '^FETCHMAIL=1' .env
+          docker exec mailserver doveadm auth test anna@home.lan LocalTest123
+
+      - name: Zugangsdaten-Test (--check) meldet die erfundenen Konten als abgelehnt
+        run: |
+          set +e
+          sudo ./setup-mailserver.sh --check | tee check.log
+          rc=${PIPESTATUS[0]}
+          test "$rc" -ne 0
+          grep -q 'ANMELDUNG ABGELEHNT' check.log
+
+      - name: Backup und Wiederherstellung
+        run: |
+          mkdir -p /tmp/bk && sudo ALLOW_SAME_DISK=1 ./backup-mail.sh /tmp/bk
+          sudo test -d /tmp/bk/latest/data/mail-data
+          sudo test "$(stat -c %a /tmp/bk)" = "700"
+
+      - name: Deinstallation ohne Mail-Daten (uninstall.sh -y)
+        run: |
+          sudo ./uninstall.sh -y
+          test -z "$(docker ps -a --format '{{.Names}}' | grep -xE 'mailserver|roundcube')"
+          test ! -e accounts.conf
+          test ! -e .env
+          test -d data/mail-data
+          test -f setup-mailserver.sh
+
+      - name: Deinstallation von allem (uninstall.sh --alles -y)
+        run: |
+          sudo ./uninstall.sh --alles -y
+          test ! -e data
+          test -f uninstall.sh
+
+      - name: Logs bei Fehler
+        if: failure()
+        run: |
+          docker ps -a || true
+          docker logs --tail 200 mailserver || true
+          docker logs --tail 100 roundcube || true
