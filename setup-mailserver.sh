@@ -177,7 +177,9 @@ for e in "${ENTRIES[@]}"; do
   c="${c:-${a%@*}}"
   [[ "$c" == *@* ]] || c="$c@$MAILDOM"
   [[ "$c" =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+$ ]] || die "Ungültiger lokaler Name: $c"
-  G_MAIL+=("$a"); G_PASS+=("${b// /}"); G_PROV+=("$g"); L_ADDR+=("$c"); L_PASS+=("$d"); L_QUOTA+=("$f")
+  # App-Passwörter (Gmail, Yahoo) werden oft mit Leerzeichen angezeigt; ein GMX-Passwort bleibt unverändert
+  [[ "$g" == "gmx" ]] || b="${b// /}"
+  G_MAIL+=("$a"); G_PASS+=("$b"); G_PROV+=("$g"); L_ADDR+=("$c"); L_PASS+=("$d"); L_QUOTA+=("$f")
 done
 
 # ---------------------------------------------------------------- Zugangsdaten testen

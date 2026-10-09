@@ -193,7 +193,7 @@ Trotzdem als $PV_NAME-Konto verwenden?" || continue
 $( [[ "$PV" == yahoo ]] && echo "Das Yahoo-App-Passwort." || echo "Das GMX-Passwort für externe Programme." )" '^[^|]{6,}$' "" \
         "Mindestens 6 Zeichen und kein Senkrechtstrich (|)."
     fi
-    GP="${GP// /}"
+    [[ "$PV" == "gmx" ]] || GP="${GP// /}"
     if yesno "Anmeldung für $GM jetzt testen (IMAP-Verbindung zu $PV_NAME)?
 
 Empfohlen: Es wird nur geprüft, ob die Zugangsdaten stimmen. Es wird nichts verändert."; then

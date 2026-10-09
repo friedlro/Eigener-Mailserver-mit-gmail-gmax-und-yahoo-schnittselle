@@ -156,6 +156,15 @@ check "Update: Exit-Code 0" test "$RC" -eq 0
 check "Update: kein Import"  test "$(ls "$D"/stub.mbsync.* | wc -l)" -eq "$N_BEFORE"
 check "Update: Abholung bleibt an" has "$D/.env" "FETCHMAIL=1"
 
+D="$(new_instance spaces)"
+cat > "$D/accounts.conf" <<'EOF'
+gina@gmx.at|mit leer zeichen|gina
+anna@gmail.com|abcd efgh ijkl mnop|anna
+EOF
+run "$D" bash setup-mailserver.sh -y
+check "GMX-Passwort mit Leerzeichen bleibt unverändert" has "$D/data/config/fetchmail.cf" 'pass "mit leer zeichen"'
+check "Gmail-App-Passwort wird von Leerzeichen befreit" has "$D/data/config/fetchmail.cf" 'pass "abcdefghijklmnop"'
+
 # ---------------------------------------------------------------- 3. Zugangsdaten prüfen
 title "3. setup-mailserver.sh --check"
 D="$(new_instance check)"
