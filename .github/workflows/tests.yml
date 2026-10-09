@@ -62,6 +62,13 @@ jobs:
           echo | openssl s_client -connect 127.0.0.1:993 -brief 2>&1 | head -n 5
           echo | openssl s_client -starttls smtp -connect 127.0.0.1:587 -brief 2>&1 | head -n 5
 
+      - name: Absender werden beim Senden auf die Anbieter-Adresse umgeschrieben (GMX erlaubt nur die eigene Adresse)
+        run: |
+          docker exec mailserver postconf -h smtp_generic_maps | grep -q 'postfix-generic.cf'
+          test "$(docker exec mailserver postmap -q anna@home.lan texthash:/tmp/docker-mailserver/postfix-generic.cf)" = "anna@gmail.com"
+          test "$(docker exec mailserver postmap -q ben@home.lan texthash:/tmp/docker-mailserver/postfix-generic.cf)" = "ben@gmx.de"
+          test "$(docker exec mailserver postmap -q clara@home.lan texthash:/tmp/docker-mailserver/postfix-generic.cf)" = "clara@yahoo.com"
+
       - name: Webmail antwortet
         run: |
           for i in $(seq 1 30); do

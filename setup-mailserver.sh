@@ -556,6 +556,7 @@ say "Konten anlegen"
 touch data/config/postfix-accounts.cf
 CRED="$BASE/zugangsdaten.txt"; ( umask 077; touch "$CRED" ); chmod 600 "$CRED"
 : > data/config/postfix-relaymap.cf
+: > data/config/postfix-generic.cf     # Absender beim Senden: lokale Adresse -> Adresse beim Anbieter
 ( umask 077; : > data/config/postfix-sasl-password.cf )
 
 for i in "${!L_ADDR[@]}"; do
@@ -571,8 +572,17 @@ for i in "${!L_ADDR[@]}"; do
   fi
   echo "$A [$(prov_host smtp "${G_PROV[$i]}" "${G_MAIL[$i]}")]:587" >> data/config/postfix-relaymap.cf
   echo "$A ${G_MAIL[$i]}:${G_PASS[$i]}" >> data/config/postfix-sasl-password.cf
+  echo "$A ${G_MAIL[$i]}" >> data/config/postfix-generic.cf
 done
 chmod 600 data/config/postfix-sasl-password.cf
+
+# GMX, Yahoo und Gmail erlauben als Absender nur die eigene Adresse beim Anbieter ("Sender address is not allowed").
+# Beim Senden wird deshalb die lokale Adresse (Umschlag und Kopfzeilen) auf die Adresse beim Anbieter umgeschrieben.
+# Eigene Zeilen in postfix-main.cf bleiben erhalten; nur die Zeile für smtp_generic_maps wird gesetzt.
+touch data/config/postfix-main.cf
+{ grep -v '^smtp_generic_maps[[:space:]]*=' data/config/postfix-main.cf || true
+  echo 'smtp_generic_maps = texthash:/tmp/docker-mailserver/postfix-generic.cf'; } > data/config/postfix-main.cf.neu
+mv data/config/postfix-main.cf.neu data/config/postfix-main.cf
 
 # ---------------------------------------------------------------- Start
 say "Container starten"
@@ -689,6 +699,8 @@ done
 chmod 600 data/config/fetchmail.cf
 write_env 1
 docker compose up -d
+# Bei --update bleibt der Container ohne Änderung an der Compose-Datei stehen: neu starten, damit Relay- und Absender-Einstellungen gelten
+[[ "$MODE" != "update" ]] || docker compose restart mailserver
 wait_dovecot
 for A in "${L_ADDR[@]}"; do
   docker exec mailserver doveadm force-resync -u "$A" '*' || warn "Index für $A konnte nicht neu aufgebaut werden (docker logs mailserver)."

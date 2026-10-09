@@ -152,6 +152,7 @@ Von Hand sofort: `./setup-mailserver.sh --cleanup` (nach der Konfiguration) oder
 | Problem | Ursache und Lösung |
 |---|---|
 | `Ungültige Kontozeile` / `Anbieter ... nicht erkannt` | Format `adresse\|passwort\|lokalname\|lokales-passwort\|quota\|anbieter`. Bei fremden Domains den Anbieter (gmail, gmx, yahoo) im sechsten Feld eintragen. Kein `\|` in Passwörtern. |
+| Senden scheitert mit `550 Sender address is not allowed` (GMX) | Der Anbieter erlaubt als Absender nur die eigene Adresse. Seit dieser Version schreibt der Server beim Senden die lokale Adresse (`name@home.lan`) auf die Adresse beim Anbieter um (`postfix-generic.cf`, `smtp_generic_maps`). Dateien aktualisieren (Installationsbefehl erneut ausführen, `accounts.conf` bleibt) und `sudo ./setup-mailserver.sh --update` starten; das startet den Mailserver neu. |
 | `ANMELDUNG ABGELEHNT` bei `--check` | Gmail/Yahoo: App-Passwort statt normalem Passwort. GMX: POP3/IMAP in den Einstellungen freischalten. Beim Anbieter ggf. Zwei-Faktor prüfen. |
 | Import schlägt fehl | Die Meldung direkt über "Import fehlgeschlagen" lesen. Zuerst `--check`. `bandwidth limits` oder `too many connections`: der Anbieter drosselt, später erneut starten. |
 | Es kommen keine neuen Mails | `docker logs --tail 100 mailserver 2>&1 \| grep -i fetchmail`. Bei GMX: Freischaltung abgelaufen? `--check`. Bei Gmail: POP auf "ab jetzt" und "Kopie löschen"? |
