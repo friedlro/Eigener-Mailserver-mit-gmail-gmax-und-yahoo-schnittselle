@@ -60,6 +60,20 @@ Unterschiede der Anbieter und was beim Import passiert: [docs/ANBIETER.md](docs/
 
 ## Schnellstart
 
+Ohne git und ohne manuellen Download (ein Befehl, lädt das Projekt nach `/opt/mailserver` und startet den Assistenten):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash
+```
+
+Solange das Repository privat ist, geht das nur mit einem GitHub-Token (fein granular, nur Leserecht auf *Contents*):
+
+```bash
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo env GITHUB_TOKEN="$GITHUB_TOKEN" bash
+```
+
+Alternativ mit git:
+
 ```bash
 sudo apt-get install -y git
 sudo git clone https://github.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle.git /opt/mailserver
