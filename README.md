@@ -1,0 +1,1 @@
+# Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle
