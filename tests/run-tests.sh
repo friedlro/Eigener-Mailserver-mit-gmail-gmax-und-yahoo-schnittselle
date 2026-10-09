@@ -43,7 +43,7 @@ for n in chown chgrp apt-get tailscale systemctl; do ln -sf "$STUBS/noop" "$W/bi
 
 # Kopie der Skripte ohne den sudo-Neustart und ohne die Terminalprüfung
 new_instance() {
-  local d="$W/$1"; mkdir -p "$d/mcp"
+  local d="$W/$1"; mkdir -p "$d/mcp" "$d/cron" "$d/logrotate" "$d/sudoers" "$d/log"
   local f
   for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh; do
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
