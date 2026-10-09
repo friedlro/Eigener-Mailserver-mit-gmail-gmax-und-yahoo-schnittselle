@@ -355,6 +355,13 @@ check "Container wurden entfernt (compose down)" has "$D/stub.args" "compose dow
 run "$D" bash uninstall.sh --hilfe
 check "unbekannte Option wird abgelehnt" test "$RC" -ne 0
 
+# ---------------------------------------------------------------- 9. Web-Oberfläche
+title "9. webui.py (Installation im Browser)"
+check "webui.py ist gültiges Python" python3 -I -m py_compile "$ROOT/webui.py"
+if command -v python3 >/dev/null; then
+  while IFS= read -r line; do echo "$line"; case "$line" in *FEHLER*) FAIL=$((FAIL + 1)) ;; *"  ok  "*) PASS=$((PASS + 1)) ;; esac; done < <(python3 -I "$ROOT/tests/test_webui.py" 2>&1)
+fi
+
 # ---------------------------------------------------------------- Ergebnis
 printf '\n== Ergebnis: %d bestanden, %d fehlgeschlagen, %d übersprungen\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]
