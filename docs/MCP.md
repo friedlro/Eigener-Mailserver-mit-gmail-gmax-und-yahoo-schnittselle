@@ -29,6 +29,22 @@ sudo bash mcp/install.sh /opt/mailserver
 Das Skript installiert bei Bedarf Tailscale (außer mit `SKIP_TAILSCALE=1`), legt `server.py` im Mailserver-Ordner ab, nimmt den Benutzer in die
 Docker-Gruppe auf und erlaubt ihm, `backup-mail.sh` ohne Passwort als root zu starten. Danach neu anmelden.
 
+### Installation in der Web-Oberfläche (mit Tailscale)
+
+In der Web-Oberfläche (`get.sh --web`) gibt es die Karte „Fernzugriff und MCP-Server“:
+
+1. **Tailscale installieren und einrichten** und optional **Tailscale SSH** einschalten (Anmeldung per SSH ohne Schlüssel).
+2. **MCP-Server installieren** und den Benutzer wählen, mit dem der Assistent sich per SSH anmeldet (ein normaler Benutzer, nicht root; er
+   bekommt Docker-Zugriff und darf `backup-mail.sh` ohne Passwort starten).
+
+Beim Installieren läuft Tailscale als erster Schritt. Die Oberfläche zeigt den **Anmeldelink von Tailscale** (`https://login.tailscale.com/a/...`)
+hervorgehoben an: im Browser öffnen und bestätigen (die Installation wartet bis zu 5 Minuten, danach läuft sie ohne Tailscale weiter).
+Nach der Installation zeigt die Oberfläche die Tailscale-Adresse und die fertige Konfiguration für Claude Desktop. Von Hand geht beides mit
+`sudo ./tailscale-setup.sh --ssh` und `sudo bash mcp/install.sh /opt/mailserver`.
+
+Damit Tailscale SSH den Zugriff erlaubt, muss in deinem Tailnet eine passende SSH-Regel gelten (Standard: eigene Geräte, mit Bestätigung im Browser:
+<https://tailscale.com/kb/1193/tailscale-ssh>). Das Gerät, auf dem Claude Desktop läuft, muss im selben Tailnet angemeldet sein.
+
 ## Anbindung in Claude Desktop
 
 In `claude_desktop_config.json` (Benutzer und IP anpassen):

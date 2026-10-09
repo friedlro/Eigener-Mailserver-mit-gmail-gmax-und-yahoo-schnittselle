@@ -40,13 +40,14 @@ chmod +x "$STUBS"/* 2>/dev/null || true
 mkdir -p "$W/bin"
 for n in docker curl whiptail; do ln -sf "$STUBS/$n" "$W/bin/$n"; done
 for n in blkid mkfs.ext4 mount umount mountpoint systemctl; do ln -sf "$STUBS/usbtool" "$W/bin/$n"; done
-for n in chown chgrp apt-get tailscale systemctl; do ln -sf "$STUBS/noop" "$W/bin/$n"; done
+ln -sf "$STUBS/tailscale" "$W/bin/tailscale"
+for n in chown chgrp apt-get systemctl; do ln -sf "$STUBS/noop" "$W/bin/$n"; done
 
 # Kopie der Skripte ohne den sudo-Neustart und ohne die Terminalprüfung
 new_instance() {
   local d="$W/$1"; mkdir -p "$d/mcp" "$d/cron" "$d/logrotate" "$d/sudoers" "$d/log"
   local f
-  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh; do
+  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh tailscale-setup.sh; do
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
   done
   cp "$ROOT/mcp/install.sh" "$d/mcp/"
@@ -330,6 +331,23 @@ check "--first-run startet die erste Sicherung" has "$D/out" "Erste Sicherung st
 usb --remove
 check "--remove entfernt Cron und fstab-Eintrag" bash -c "[[ ! -e '$D/cron/mail-backup' ]] && ! grep -q 'mail-backup' '$D/fstab'"
 check "usbdisks.py ist gültiges Python" python3 -I -m py_compile "$ROOT/usbdisks.py"
+
+# ---------------------------------------------------------------- 5d. Tailscale
+title "5d. tailscale-setup.sh (Tailscale einrichten, Anmeldelink ausgeben)"
+D="$(new_instance ts)"
+echo out > "$D/ts-state"
+tsrun() { run "$D" env STUB_TS_STATE="$D/ts-state" bash tailscale-setup.sh "$@"; }
+tsrun --ssh --timeout 120
+check "Tailscale: Anmeldelink wird ausgegeben" has "$D/out" "https://login.tailscale.com/a/abc123XYZ"
+check "Tailscale: mit SSH und der gewünschten Wartezeit angemeldet" has "$D/stub.ts" "tailscale up --timeout=120s --ssh"
+check "Tailscale: IP und Name am Ende der Ausgabe" bash -c "grep -qx 'Tailscale-IP: 100.64.1.2' '$D/out' && grep -qx 'Tailscale-Name: testserver.tail1234.ts.net' '$D/out'"
+: > "$D/stub.ts"
+tsrun --ssh
+check "Tailscale: bereits angemeldet, kein erneutes 'up'" bash -c "[[ $RC -eq 0 ]] && ! grep -q 'tailscale up' '$D/stub.ts' && grep -q 'Tailscale-IP' '$D/out'"
+check "Tailscale: bei bestehender Anmeldung wird SSH nachträglich eingeschaltet" has "$D/stub.ts" "tailscale set --ssh=true"
+tsrun --timeout abc
+check "Tailscale: ungültige Wartezeit wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Zahl' '$D/out'"
+check "tailscale-setup.sh und mcp/install.sh: Syntax" bash -c "bash -n '$ROOT/tailscale-setup.sh' && bash -n '$ROOT/mcp/install.sh'"
 
 # ---------------------------------------------------------------- 6. Installationsassistent
 title "6. install.sh (Menüoberfläche) und Zusammenspiel mit setup-mailserver.sh"

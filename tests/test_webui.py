@@ -38,7 +38,14 @@ port = free_port()
 fakeusb = os.path.join(tmp, "usb-backup.sh")
 with open(fakeusb, "w") as f:
     f.write('#!/usr/bin/env bash\necho "USB-Platzhalter: $*"\nexit ${USB_RC:-0}\n')
-env = dict(os.environ, MAILSERVER_USB=fakeusb, USBDISKS_LSBLK_JSON=os.path.join(ROOT, "tests", "fixtures", "lsblk.json"), MAILSERVER_SETUP=fake, WEBUI_ALLOW_NONROOT="1", WEBUI_PASSWORD="testpw12345")
+fakets = os.path.join(tmp, "tailscale-setup.sh")
+with open(fakets, "w") as f:
+    f.write('#!/usr/bin/env bash\necho "TS-Platzhalter: $*"\nprintf "To authenticate, visit:\\n\\n\\thttps://login.tailscale.com/a/abc123XYZ\\n"\n'
+            'echo "Tailscale-IP: 100.64.1.2"\necho "Tailscale-Name: testserver.tail1234.ts.net"\nexit ${TS_RC:-0}\n')
+fakemcp = os.path.join(tmp, "mcp-install.sh")
+with open(fakemcp, "w") as f:
+    f.write('#!/usr/bin/env bash\necho "MCP-Platzhalter: $1 benutzer=$SUDO_USER skip=$SKIP_TAILSCALE"\nexit 0\n')
+env = dict(os.environ, MAILSERVER_TS=fakets, MAILSERVER_MCP=fakemcp, MAILSERVER_USB=fakeusb, USBDISKS_LSBLK_JSON=os.path.join(ROOT, "tests", "fixtures", "lsblk.json"), MAILSERVER_SETUP=fake, WEBUI_ALLOW_NONROOT="1", WEBUI_PASSWORD="testpw12345")
 proc = subprocess.Popen([sys.executable, "-I", os.path.join(tmp, "webui.py"), "--bind", "127.0.0.1", "--port", str(port)],
                         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 for _ in range(50):
@@ -138,6 +145,56 @@ try:
         "CLEAN_INBOX=gmx,yahoo", "CLEAN_SPAM=gmail,gmx,yahoo", "CLEAN_TRASH=gmail", "CLEAN_DAYS=7", "GMAIL_EMPTY_SENT=1", "GMAIL_SENT_DAYS=14")))
     st, body, _ = req("GET", "/api/creds", cookie=cookie)
     check("Zugangsdaten sind nach Anmeldung abrufbar", st == 200 and "Geheim123" in body)
+    # --- Tailscale und MCP-Server
+    def finish():
+        j = {}
+        for _ in range(60):
+            _, body, _ = req("GET", "/api/log?from=0", cookie=cookie)
+            j = json.loads(body)
+            if j["done"]:
+                break
+            time.sleep(0.1)
+        return j
+
+    def mc(**kw):
+        m = {"tailscale": True, "ssh": True, "enabled": True, "user": "nobody"}
+        m.update(kw)
+        return dict(good, action="install", options=dict(good["options"], mcp=m))
+
+    def errs2(payload):
+        st, body, _ = run(payload)
+        return st, " ".join(json.loads(body).get("errors", [])) if st == 400 else ""
+
+    st, e = errs2(mc(user=""))
+    check("MCP: ohne Benutzer wird abgelehnt", st == 400 and "Benutzername" in e)
+    st, e = errs2(mc(user="root"))
+    check("MCP: root wird abgelehnt", st == 400 and "nicht root" in e)
+    st, e = errs2(mc(user="gibt-es-nicht-xyz"))
+    check("MCP: unbekannter Benutzer wird abgelehnt", st == 400 and "gibt es auf diesem Server nicht" in e)
+    st, e = errs2(mc(user="x; rm -rf /"))
+    check("MCP: manipulierter Benutzername wird abgelehnt", st == 400)
+    time.sleep(0.3)
+    st, _, _ = run(mc())
+    j = finish()
+    L = j["lines"]
+    order = [next((i for i, x in enumerate(L) if k in x), -1) for k in ("=== Tailscale einrichten", "Platzhalter: -y", "=== MCP-Server installieren")]
+    check("Tailscale zuerst, dann Installation, dann MCP-Server", st == 200 and all(i >= 0 for i in order) and order == sorted(order))
+    check("Tailscale: mit SSH und Wartezeit gestartet", "TS-Platzhalter: --timeout 300 --ssh" in L)
+    check("MCP: Benutzer wird übergeben, Tailscale nicht doppelt installiert", any("benutzer=nobody skip=1" in x for x in L))
+    check("Anmeldelink von Tailscale wird erkannt", j["links"] == ["https://login.tailscale.com/a/abc123XYZ"])
+    check("Tailscale-Adresse und -Name werden erkannt", j["info"] == {"ip": "100.64.1.2", "name": "testserver.tail1234.ts.net"})
+    check("MCP: Benutzer und Pfad für die Verbindung kommen an", j["mcp"] and j["mcp"]["user"] == "nobody" and j["mcp"]["path"].endswith("/mcp/server.py"))
+    time.sleep(0.3)
+    st, _, _ = run(mc(enabled=False, ssh=False))
+    j = finish()
+    check("nur Tailscale: ohne SSH-Schalter und ohne MCP", st == 200 and "TS-Platzhalter: --timeout 300" in j["lines"] and not any("MCP-Platzhalter" in x for x in j["lines"]) and j["mcp"] is None)
+    time.sleep(0.3)
+    st, _, _ = run(dict(mc(), action="check"))
+    j = finish()
+    check("beim Zugangsdaten-Test wird weder Tailscale noch MCP eingerichtet", st == 200 and not any("Platzhalter: --timeout" in x or "MCP-Platzhalter" in x for x in j["lines"]))
+    st, body, _ = req("GET", "/", cookie=cookie)
+    check("Formular enthält die MCP-/Tailscale-Karte", "Fernzugriff und MCP-Server" in body and 'id="mcp_on"' in body)
+
     # --- Backup auf USB-Datenträger
     st, body, _ = req("GET", "/api/devices", cookie=cookie)
     devs = json.loads(body)["devices"] if st == 200 else []
