@@ -78,7 +78,7 @@ jobs:
             $c = stream_context_create(["ssl" => ["cafile" => "/certs/cert.pem", "verify_peer" => true, "verify_peer_name" => true]]);
             $s = @stream_socket_client("ssl://mail.home.lan:993", $e, $m, 10, STREAM_CLIENT_CONNECT, $c);
             echo $s ? "TLS-Verbindung mit Prüfung: OK\n" : "FEHLER: $m\n";
-            exit($s ? 0 : 1);'; then echo 'FEHLER: Verbindung ohne vertrauenswürdiges Zertifikat wurde akzeptiert'; exit 1; fi
+            exit($s ? 0 : 1);'
           # und ohne das Zertifikat muss die Prüfung scheitern
           if docker exec roundcube php -r '
             $c = stream_context_create(["ssl" => ["verify_peer" => true, "verify_peer_name" => true]]);
