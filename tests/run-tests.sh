@@ -39,16 +39,18 @@ perm()  { [[ "$(stat -c %a "$1" 2>/dev/null)" == "$2" ]]; }
 chmod +x "$STUBS"/* 2>/dev/null || true
 mkdir -p "$W/bin"
 for n in docker curl whiptail; do ln -sf "$STUBS/$n" "$W/bin/$n"; done
+for n in blkid mkfs.ext4 mount umount mountpoint systemctl; do ln -sf "$STUBS/usbtool" "$W/bin/$n"; done
 for n in chown chgrp apt-get tailscale systemctl; do ln -sf "$STUBS/noop" "$W/bin/$n"; done
 
 # Kopie der Skripte ohne den sudo-Neustart und ohne die Terminalprüfung
 new_instance() {
   local d="$W/$1"; mkdir -p "$d/mcp" "$d/cron" "$d/logrotate" "$d/sudoers" "$d/log"
   local f
-  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh; do
+  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh; do
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
   done
   cp "$ROOT/mcp/install.sh" "$d/mcp/"
+  cp "$ROOT/cleanup.py" "$ROOT/usbdisks.py" "$d/"
   echo "$d"
 }
 
@@ -236,6 +238,92 @@ check "Cron: Gmail-Aufräumen angelegt"     has "$D/cron/mailserver-gmail-cleanu
 check "Compose: Let's-Encrypt-Zertifikate eingebunden" has "$CO" "./data/certbot:/etc/letsencrypt:ro"
 check "Compose: kein selbst signiertes Zertifikat im Webmail" hasnt "$CO" "/certs/cert.pem"
 if [[ -n "$REAL_DOCKER" ]]; then check "docker compose config: Datei ist gültig" compose_ok "$D"; else skip "docker nicht vorhanden (compose config)"; fi
+
+# ---------------------------------------------------------------- 5b. Aufräumen beim Anbieter
+title "5b. Aufräumen beim Anbieter (Posteingang, Spam, Papierkorb je Anbieter)"
+D="$(new_instance clean)"
+for u in anna ben clara; do mkdir -p "$D/data/mail-data/home.lan/$u/cur"; echo "Message-ID: <$u@x>" > "$D/data/mail-data/home.lan/$u/cur/1"; done
+cat > "$D/accounts.conf" <<'EOF'
+CLEAN_INBOX=gmx,yahoo
+CLEAN_SPAM=alle
+CLEAN_TRASH=gmail
+CLEAN_DAYS=7
+anna@gmail.com|abcdabcdabcdabcd|anna
+ben@gmx.at|GmxSecret99|ben
+clara@yahoo.com|qrstuvwxyzabcdef|clara
+dora@gmx.de|DoraSecret1|dora
+EOF
+run "$D" bash setup-mailserver.sh --cleanup --dry-run
+check "Aufräumen: Probelauf endet mit Exit-Code 0" test "$RC" -eq 0
+check "Aufräumen: Probelauf ist als solcher gekennzeichnet" has "$D/out" "PROBELAUF"
+check "Aufräumen: Konto ohne lokale Mails wird übersprungen" bash -c "grep -q 'dora@gmx.de' '$D/out' && grep -A1 'dora@gmx.de' '$D/out' | grep -q 'übersprungen'"
+check "Aufräumen: ein Container je Konto mit lokalen Mails" test "$(ls "$D"/stub.cleanup.* 2>/dev/null | wc -l)" -eq 3
+cl() { grep -l "^CL_USER=$1" "$D"/stub.cleanup.* | head -n1; }
+check "Aufräumen: Gmail nur Papierkorb und Spam" bash -c "f=\"$(cl anna@gmail.com)\"; grep -qx 'CL_TRASH=1' \"\$f\" && grep -qx 'CL_SPAM=1' \"\$f\" && grep -qx 'CL_INBOX=0' \"\$f\""
+check "Aufräumen: GMX (gmx.at): Posteingang und Spam, kein Papierkorb" bash -c "f=\"$(cl ben@gmx.at)\"; grep -qx 'CL_INBOX=1' \"\$f\" && grep -qx 'CL_SPAM=1' \"\$f\" && grep -qx 'CL_TRASH=0' \"\$f\" && grep -qx 'CL_HOST=imap.gmx.net' \"\$f\""
+check "Aufräumen: Yahoo: Posteingang und Spam" bash -c "f=\"$(cl clara@yahoo.com)\"; grep -qx 'CL_INBOX=1' \"\$f\" && grep -qx 'CL_HOST=imap.mail.yahoo.com' \"\$f\""
+check "Aufräumen: Probelauf und Altersgrenze kommen an" bash -c "f=\"$(cl anna@gmail.com)\"; grep -qx 'CL_DRY=1' \"\$f\" && grep -qx 'CL_DAYS=7' \"\$f\""
+check "Aufräumen: Passwörter stehen nie in Docker-Argumenten" bash -c "! grep -qE 'GmxSecret99|abcdabcdabcdabcd|qrstuvwxyzabcdef' '$D/stub.args'"
+check "Aufräumen: Passwort kommt trotzdem im Container an" bash -c "grep -qx 'CL_PASSLEN=11' \"$(cl ben@gmx.at)\""
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --cleanup
+check "Aufräumen: echter Lauf ohne Probelauf" bash -c "grep -qx 'CL_DRY=0' \"$(cl clara@yahoo.com)\""
+# Gmail-Posteingang erst nach abgeschlossenem Import
+sed -i 's/^CLEAN_INBOX=.*/CLEAN_INBOX=gmail/' "$D/accounts.conf"
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --cleanup
+check "Gmail-Posteingang: ohne abgeschlossenen Import übersprungen" bash -c "grep -q 'Import nicht abgeschlossen' '$D/out' && grep -qx 'CL_INBOX=0' \"$(cl anna@gmail.com)\""
+mkdir -p "$D/data/import-done"; : > "$D/data/import-done/anna@home.lan.done"
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --cleanup
+check "Gmail-Posteingang: nach abgeschlossenem Import freigegeben" bash -c "grep -qx 'CL_INBOX=1' \"$(cl anna@gmail.com)\""
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --empty-trash
+check "--empty-trash leert den Papierkorb bei allen Anbietern" bash -c "[[ \$(grep -l '^CL_TRASH=1' '$D'/stub.cleanup.* | wc -l) -eq 3 ]]"
+printf '%s\n' 'anna@gmail.com|abcdabcdabcdabcd|anna' > "$D/accounts.conf"
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --cleanup
+check "Ohne Einstellung wird nichts aufgeräumt" bash -c "has() { grep -qF \"\$2\" \"\$1\"; }; has '$D/out' 'Nichts zu tun' && ! ls '$D'/stub.cleanup.* >/dev/null 2>&1"
+printf '%s\n' 'CLEAN_TRASH=hotmail' 'anna@gmail.com|abcdabcdabcdabcd|anna' > "$D/accounts.conf"
+run "$D" bash setup-mailserver.sh --cleanup
+check "Unbekannter Anbieter in CLEAN_TRASH wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'kein Anbieter' '$D/out'"
+printf '%s\n' 'GMAIL_EMPTY_TRASH=1' 'GMAIL_TRASH_DAYS=30' 'anna@gmail.com|abcdabcdabcdabcd|anna' > "$D/accounts.conf"
+rm -f "$D"/stub.cleanup.*
+run "$D" bash setup-mailserver.sh --cleanup
+check "Ältere GMAIL_EMPTY_TRASH-Einstellung funktioniert weiter" bash -c "f=\"$(cl anna@gmail.com)\"; grep -qx 'CL_TRASH=1' \"\$f\" && grep -qx 'CL_DAYS=30' \"\$f\""
+check "cleanup.py ist gültiges Python" python3 -I -m py_compile "$ROOT/cleanup.py"
+check "cleanup.py: Tests mit nachgebautem IMAP-Server" python3 -I "$ROOT/tests/test_cleanup.py"
+
+# ---------------------------------------------------------------- 5c. USB-Backup
+title "5c. usb-backup.sh (USB-Datenträger als Backup-Ziel)"
+D="$(new_instance usb)"; mkdir -p "$D/cron" "$D/logrotate" "$D/mnt"; : > "$D/fstab"
+usb() { run "$D" env USBDISKS_LSBLK_JSON="$ROOT/tests/fixtures/lsblk.json" BACKUP_MOUNT="$D/mnt/mail-backup" FSTAB="$D/fstab" BACKUP_LOG="$D/backup.log" bash usb-backup.sh "$@"; }
+usb --list
+check "--list zeigt die Sticks" bash -c "grep -q '/dev/sdb1' '$D/out' && grep -q '/dev/sdb2' '$D/out' && grep -q '/dev/sdc' '$D/out'"
+check "--list zeigt weder Systemplatte noch interne Platte noch Boot-Stick" bash -c "! grep -qE 'nvme0n1|/dev/sda|/dev/sdd' '$D/out'"
+usb --setup /dev/sda1
+check "interne Platte (/dev/sda1) wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'kein geeigneter' '$D/out'"
+usb --setup /dev/sdd1
+check "USB-Stick mit dem laufenden System (/dev/sdd1) wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'kein geeigneter' '$D/out'"
+usb --setup '/dev/sdb1; rm -rf /'
+check "ungültiger Gerätename wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'ungültig' '$D/out'"
+usb --setup /dev/sdb2
+check "NTFS-Stick ohne --format wird abgelehnt, nichts formatiert" bash -c "[[ $RC -ne 0 ]] && grep -q 'ungeeignet' '$D/out' && ! grep -q '^mkfs' '$D/stub.usb' 2>/dev/null"
+usb --setup /dev/sdb1 --keep-days 5
+check "vorhandenes ext4: Einrichtung ohne Formatieren" bash -c "[[ $RC -eq 0 ]] && ! grep -q '^mkfs' '$D/stub.usb'"
+check "automatisch eingehängter Stick wird zuerst ausgehängt" has "$D/stub.usb" "umount /media/roland/MAILBACKUP"
+check "fstab: UUID, Einhängepunkt, nofail" bash -c "grep -qE '^UUID=1111-2222-aaaa $D/mnt/mail-backup ext4 defaults,nofail,noatime 0 2 # mail-backup' '$D/fstab'"
+check "Stick wird eingehängt" has "$D/stub.usb" "mount $D/mnt/mail-backup"
+check "Backup-Cron mit Einhängepunkt, REQUIRE_MOUNT und Aufbewahrung" bash -c "grep -q 'REQUIRE_MOUNT=1' '$D/cron/mail-backup' && grep -q 'KEEP_DAYS=5' '$D/cron/mail-backup' && grep -qF \"'$D/mnt/mail-backup'\" '$D/cron/mail-backup'"
+check "Einhängepunkt hat Rechte 700" perm "$D/mnt/mail-backup" 700
+usb --setup /dev/sdc --format
+check "--format legt ext4 mit Namen an" bash -c "[[ $RC -eq 0 ]] && grep -qx 'mkfs.ext4 -F -L MAILBACKUP /dev/sdc' '$D/stub.usb'"
+check "fstab enthält genau einen Backup-Eintrag (der alte wird ersetzt)" test "$(grep -c '# mail-backup' "$D/fstab")" -eq 1
+usb --setup /dev/sdb1 --first-run
+check "--first-run startet die erste Sicherung" has "$D/out" "Erste Sicherung starten"
+usb --remove
+check "--remove entfernt Cron und fstab-Eintrag" bash -c "[[ ! -e '$D/cron/mail-backup' ]] && ! grep -q 'mail-backup' '$D/fstab'"
+check "usbdisks.py ist gültiges Python" python3 -I -m py_compile "$ROOT/usbdisks.py"
 
 # ---------------------------------------------------------------- 6. Installationsassistent
 title "6. install.sh (Menüoberfläche) und Zusammenspiel mit setup-mailserver.sh"

@@ -12,3 +12,7 @@ data/
 *.log
 *.tmp
 *.swp
+
+# Python
+__pycache__/
+*.pyc

@@ -61,15 +61,23 @@ clara@yahoo.com|qrst uvwx yzab cdef|clara
 # TIMEZONE=Europe/Vienna
 
 # ---------------------------------------------------------------------------
-# OPTIONAL: Gmail automatisch aufräumen (löscht bei Google ENDGÜLTIG!)
-# Gilt nur für Gmail-Konten. Erst aktivieren, wenn Import und Backup nachweislich laufen.
-# Täglicher Job um 04:45 Uhr; von Hand: ./setup-mailserver.sh --cleanup
+# OPTIONAL: Mails beim Anbieter automatisch löschen (löscht ENDGÜLTIG, nicht rückgängig zu machen!)
+# Je Anbieter wählbar. Werte: gmail, gmx, yahoo (kommagetrennt) oder alle.
+#   CLEAN_INBOX   Posteingang: gelöscht wird NUR, was lokal nachweislich gespeichert ist (Message-ID-Abgleich).
+#                 Bei Gmail erst nach abgeschlossenem Import, die Mails gehen dort zuerst in den Papierkorb.
+#   CLEAN_SPAM    Spam-Ordner leeren (Spam und Papierkorb werden nie importiert)
+#   CLEAN_TRASH   Papierkorb leeren
+#   CLEAN_DAYS    nur Mails älter als N Tage (0 = alle)
+#   GMAIL_EMPTY_SENT=1  Gmail: Ordner "Gesendet" in den Papierkorb verschieben (GMAIL_SENT_DAYS = älter als N Tage)
+# Täglicher Job um 04:45 Uhr. Vorher ansehen, was gelöscht würde (ändert nichts):
+#   ./setup-mailserver.sh --cleanup --dry-run
+# Erst aktivieren, wenn Import und Backup nachweislich laufen.
+# Die älteren Einstellungen GMAIL_EMPTY_TRASH, GMAIL_EMPTY_SPAM und GMAIL_TRASH_DAYS funktionieren weiter.
 # ---------------------------------------------------------------------------
-# GMAIL_EMPTY_TRASH=1    # Papierkorb leeren
-# GMAIL_TRASH_DAYS=30    # nur Mails älter als N Tage (0 = alle)
-# GMAIL_EMPTY_SPAM=0     # 1 = auch Spam leeren
-# GMAIL_EMPTY_SENT=0     # 1 = "Gesendet" in den Papierkorb verschieben
-# GMAIL_SENT_DAYS=30     # nur Mails älter als N Tage (0 = alle)
+# CLEAN_INBOX=gmx,yahoo
+# CLEAN_SPAM=alle
+# CLEAN_TRASH=alle
+# CLEAN_DAYS=7
 
 # ---------------------------------------------------------------------------
 # OPTIONAL (Fortgeschrittene): andere Image-Versionen als die getesteten

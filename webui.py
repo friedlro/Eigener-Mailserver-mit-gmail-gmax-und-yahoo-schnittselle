@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SETUP = os.environ.get("MAILSERVER_SETUP", os.path.join(BASE, "setup-mailserver.sh"))
+USB = os.environ.get("MAILSERVER_USB", os.path.join(BASE, "usb-backup.sh"))
 CONF = os.path.join(BASE, "accounts.conf")
 CREDS = os.path.join(BASE, "zugangsdaten.txt")
 IDLE_EXIT = int(os.environ.get("WEBUI_IDLE_EXIT", "900"))  # Sekunden ohne Zugriff nach Abschluss
@@ -44,6 +45,43 @@ RE_DOMAIN = re.compile(r"^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$")
 RE_TOKEN = re.compile(r"^[A-Za-z0-9_.=-]*$")
 RE_MAIL = re.compile(r"^[^\s@|]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 PROVIDERS = ("", "gmail", "gmx", "yahoo")
+
+
+def usb_candidates():
+    """USB-Datenträger für das Backup (usbdisks.py wird per Pfad geladen, auch wenn webui.py mit python -I läuft)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("usbdisks", os.path.join(BASE, "usbdisks.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.candidates()
+
+
+def validate_backup(data):
+    """Prüft die Backup-Auswahl. Gibt (Auswahl oder None, Fehlerliste) zurück. Das Gerät wird gegen die echte Liste geprüft."""
+    b = (data.get("options") or {}).get("backup") or {}
+    if not isinstance(b, dict) or not b.get("enabled"):
+        return None, []
+    dev = clean(b.get("device"))
+    days = clean(b.get("keep_days")) or "7"
+    errors = []
+    if not days.isdigit() or not 1 <= int(days) <= 3650:
+        errors.append("Backup: Aufbewahrung in Tagen (1 bis 3650).")
+    try:
+        found = {c["path"]: c for c in usb_candidates()}
+    except (SystemExit, Exception) as e:  # noqa: BLE001
+        return None, [f"Backup: Datenträger konnten nicht gelesen werden ({e})."]
+    cand = found.get(dev)
+    if not cand:
+        errors.append("Backup: Bitte einen angezeigten USB-Datenträger auswählen (Liste aktualisieren, falls er fehlt).")
+        return None, errors
+    fmt = bool(b.get("format"))
+    if not cand["keeps_data"] and not fmt:
+        errors.append(f"Backup: {dev} hat kein geeignetes Dateisystem. Zum Verwenden muss er formatiert werden (löscht alles).")
+    if fmt and clean(b.get("confirm")) != dev:
+        errors.append(f"Backup: Zum Formatieren bitte zur Bestätigung {dev} eintippen. Dabei gehen ALLE Daten auf dem Datenträger verloren.")
+    if errors:
+        return None, errors
+    return {"device": dev, "format": fmt, "keep_days": days, "first_run": bool(b.get("first_run"))}, []
 
 
 class State:
@@ -142,20 +180,45 @@ def validate(data):
         if not RE_TOKEN.match(tunnel):
             errors.append("Cloudflare-Tunnel-Token: ungültige Zeichen.")
         out.append(f"CF_TUNNEL_TOKEN={tunnel}")
-    if opt.get("gmail_cleanup"):
-        days = clean(opt.get("gmail_trash_days")) or "30"
-        if not days.isdigit():
-            errors.append("Tage für das Gmail-Aufräumen: Zahl.")
-        out.append("GMAIL_EMPTY_TRASH=1")
-        out.append(f"GMAIL_TRASH_DAYS={days}")
+    cl = opt.get("cleanup") or {}
+    if not isinstance(cl, dict):
+        cl = {}
+    any_clean = False
+    for key, name in (("inbox", "CLEAN_INBOX"), ("spam", "CLEAN_SPAM"), ("trash", "CLEAN_TRASH")):
+        sel = cl.get(key) or []
+        if not isinstance(sel, list) or any(p not in ("gmail", "gmx", "yahoo") for p in sel):
+            errors.append("Aufräumen: ungültige Anbieterauswahl.")
+            continue
+        sel = [p for p in ("gmail", "gmx", "yahoo") if p in sel]
+        if sel:
+            any_clean = True
+            out.append(f"{name}={','.join(sel)}")
+    if cl.get("gmail_sent"):
+        any_clean = True
+        out.append("GMAIL_EMPTY_SENT=1")
+        sdays = clean(cl.get("sent_days")) or "30"
+        if not sdays.isdigit():
+            errors.append("Aufräumen: Tage für 'Gesendet' müssen eine Zahl sein.")
+        out.append(f"GMAIL_SENT_DAYS={sdays}")
+    if any_clean:
+        cdays = clean(cl.get("days")) or "0"
+        if not cdays.isdigit():
+            errors.append("Aufräumen: Tage müssen eine Zahl sein (0 = alle).")
+        out.append(f"CLEAN_DAYS={cdays}")
     text = "# Von webui.py geschrieben\n" + "\n".join(lines) + "\n\n" + "\n".join(out) + "\n"
     return text, errors
 
 
 def write_conf(text):
     if os.path.exists(CONF):
-        bk = f"{CONF}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
-        fd = os.open(bk, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        stamp, n = time.strftime("%Y%m%d-%H%M%S"), 0
+        while True:  # zwei Läufe in derselben Sekunde dürfen sich nicht in die Quere kommen
+            bk = f"{CONF}.bak-{stamp}" + (f"-{n}" if n else "")
+            try:
+                fd = os.open(bk, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                break
+            except FileExistsError:
+                n += 1
         with os.fdopen(fd, "wb") as f, open(CONF, "rb") as src:
             f.write(src.read())
     fd = os.open(CONF, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -164,18 +227,34 @@ def write_conf(text):
     os.chmod(CONF, 0o600)
 
 
-def run_job(action):
+def run_job(action, backup=None):
     args = ["bash", SETUP] + (["--check"] if action == "check" else ["-y"])
     job = {"action": action, "lines": [], "done": False, "rc": None}
     S.job = job
 
+    def run_step(cmd):
+        p = subprocess.Popen(cmd, cwd=BASE, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+        for line in p.stdout:
+            job["lines"].append(ANSI.sub("", line.rstrip("\n")))
+        return p.wait()
+
     def worker():
         try:
-            p = subprocess.Popen(args, cwd=BASE, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
-            for line in p.stdout:
-                job["lines"].append(ANSI.sub("", line.rstrip("\n")))
-            job["rc"] = p.wait()
+            job["rc"] = run_step(args)
+            if job["rc"] == 0 and backup and action == "install":
+                job["lines"].append("")
+                job["lines"].append("=== Backup auf USB-Datenträger einrichten ===")
+                cmd = ["bash", USB, "--setup", backup["device"], "--keep-days", backup["keep_days"]]
+                if backup["format"]:
+                    cmd.append("--format")
+                if backup["first_run"]:
+                    cmd.append("--first-run")
+                rc = run_step(cmd)
+                if rc != 0:
+                    job["lines"].append("Der Mailserver ist installiert, aber das Backup konnte NICHT eingerichtet werden (siehe oben). "
+                                        "Später erneut: sudo ./usb-backup.sh --setup %s" % backup["device"])
+                    job["rc"] = rc
         except Exception as e:  # noqa: BLE001
             job["lines"].append(f"Start fehlgeschlagen: {e}")
             job["rc"] = 1
@@ -220,14 +299,31 @@ APP = """<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewpo
 <div><label>Webmail erreichbar</label><select id="webmail_bind"><option value="0.0.0.0">im Heimnetz</option><option value="127.0.0.1">nur auf dem Server</option></select></div>
 <div><label>Gmail-Import: ordner = Labels als Ordner, alles = ohne Ordner</label><select id="import_mode"><option value="ordner">ordner</option><option value="alles">alles</option></select></div>
 <div><label>Zeitzone (optional)</label><input id="timezone" placeholder="Europe/Vienna"></div></div></div>
-<div class="card"><details><summary>Fortgeschritten: Domain, Cloudflare, Gmail aufräumen</summary>
+<div class="card"><h2>Mails beim Anbieter löschen (optional)</h2>
+<p class="hint"><b>Löscht endgültig beim Anbieter</b> und läuft danach täglich um 04:45 Uhr. Spam und Papierkorb werden ohne Abgleich geleert (sie werden nie importiert).
+Der <b>Posteingang</b> wird nur um Mails bereinigt, die lokal nachweislich gespeichert sind; bei Gmail erst nach vollständigem Import (die Mails landen dort zuerst im Papierkorb).
+Mit <code>sudo /opt/mailserver/setup-mailserver.sh --cleanup --dry-run</code> siehst du vorher, was gelöscht würde.</p>
+<table style="width:100%;border-collapse:collapse"><tr><th style="text-align:left"></th><th>Gmail</th><th>GMX</th><th>Yahoo</th></tr>
+<tr><td>Posteingang</td><td align="center"><input type="checkbox" class="cl" data-k="inbox" data-p="gmail" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="inbox" data-p="gmx" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="inbox" data-p="yahoo" style="width:auto"></td></tr>
+<tr><td>Spam</td><td align="center"><input type="checkbox" class="cl" data-k="spam" data-p="gmail" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="spam" data-p="gmx" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="spam" data-p="yahoo" style="width:auto"></td></tr>
+<tr><td>Papierkorb</td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="gmail" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="gmx" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="yahoo" style="width:auto"></td></tr></table>
+<div class="row"><div><label>Nur Mails älter als (Tage, 0 = alle)</label><input id="cl_days" value="0" inputmode="numeric"></div></div>
+<label><input type="checkbox" id="cl_sent" style="width:auto"> Gmail: Ordner „Gesendet“ in den Papierkorb verschieben</label></div>
+<div class="card"><h2>Backup auf USB-Datenträger (optional)</h2>
+<label><input type="checkbox" id="bk_on" style="width:auto"> Backup auf einen angesteckten USB-Datenträger einrichten und den täglichen Job (03:30 Uhr) starten</label>
+<div id="bk_box" style="display:none"><p class="hint">Angeboten werden nur USB-Datenträger, nie die Systemplatte. Ein vorhandenes Linux-Dateisystem (ext4, xfs, btrfs) wird weiterverwendet, ohne etwas zu löschen. Sicherungen älter als die gewählten Tage werden automatisch gelöscht.</p>
+<div id="bk_list" class="hint">Suche Datenträger …</div>
+<div class="bar"><button type="button" class="sec" id="bk_refresh">Liste aktualisieren</button></div>
+<div id="bk_fmt" style="display:none"><label><input type="checkbox" id="bk_format" style="width:auto"> <b>Datenträger formatieren</b> (löscht ALLE Daten darauf, legt ext4 an)</label>
+<label>Zur Bestätigung den Gerätenamen eintippen (<span id="bk_dev"></span>)</label><input id="bk_confirm" autocomplete="off"></div>
+<div class="row"><div><label>Sicherungen aufbewahren (Tage)</label><input id="bk_days" value="7" inputmode="numeric"></div></div>
+<label><input type="checkbox" id="bk_first" checked style="width:auto"> Erste Sicherung nach der Installation gleich im Hintergrund starten</label></div></div>
+<div class="card"><details><summary>Fortgeschritten: Domain und Cloudflare</summary>
 <div class="row"><div><label>Domain (optional)</label><input id="domain" placeholder="meinedomain.at"></div>
 <div><label>Cloudflare API-Token</label><input id="cf_api_token" type="password"></div>
 <div><label>E-Mail für Let's Encrypt</label><input id="le_email"></div>
 <div><label>Cloudflare-Tunnel-Token (optional)</label><input id="cf_tunnel_token" type="password"></div></div>
 <label><input type="checkbox" id="ddns" checked style="width:auto"> DNS-Adresse mail.&lt;Domain&gt; automatisch aktuell halten</label>
-<label><input type="checkbox" id="gmail_cleanup" style="width:auto"> Gmail-Papierkorb täglich leeren (löscht bei Google <b>endgültig</b>, erst nach erfolgreichem Test)</label>
-<div class="row"><div><label>Nur Mails älter als (Tage)</label><input id="gmail_trash_days" value="30" inputmode="numeric"></div></div>
 </details></div>
 <div class="bar"><button type="button" id="check" class="sec">Zugangsdaten prüfen</button><button type="button" id="install">Installieren</button></div>
 <p class="err" id="err"></p></form>
@@ -245,11 +341,18 @@ function acc(){const d=document.createElement('div');d.className='acc';d.innerHT
 d.querySelector('.rm').onclick=()=>{if(document.querySelectorAll('.acc').length>1)d.remove()};$('accs').appendChild(d)}
 function collect(){const accounts=[...document.querySelectorAll('.acc')].map(d=>({address:d.querySelector('.a').value,password:d.querySelector('.p').value,
 provider:d.querySelector('.v').value,local:d.querySelector('.l').value,localpw:d.querySelector('.lp').value,quota:d.querySelector('.q').value})).filter(a=>a.address.trim()||a.password||a.local.trim()||a.localpw||a.quota.trim());
-const o={};['webmail_port','webmail_bind','import_mode','timezone','domain','cf_api_token','le_email','cf_tunnel_token','gmail_trash_days'].forEach(k=>o[k]=$(k).value);
-o.ddns=$('ddns').checked;o.gmail_cleanup=$('gmail_cleanup').checked;return {accounts,options:o}}
+const o={};['webmail_port','webmail_bind','import_mode','timezone','domain','cf_api_token','le_email','cf_tunnel_token'].forEach(k=>o[k]=$(k).value);
+const sel=document.querySelector('input[name=bkdev]:checked');
+o.backup={enabled:$('bk_on').checked,device:sel?sel.value:'',format:$('bk_format').checked||(sel&&sel.dataset.keeps==='0'),confirm:$('bk_confirm').value,keep_days:$('bk_days').value,first_run:$('bk_first').checked};
+o.ddns=$('ddns').checked;const cl={inbox:[],spam:[],trash:[],days:$('cl_days').value,gmail_sent:$('cl_sent').checked,sent_days:$('cl_days').value};
+document.querySelectorAll('.cl:checked').forEach(c=>cl[c.dataset.k].push(c.dataset.p));o.cleanup=cl;return {accounts,options:o}}
 let timer=null,pos=0;
 async function start(action){$('err').textContent='';
-if(action==='install'&&!confirm('Installation jetzt starten? Das kann bei großen Postfächern Stunden dauern.'))return;
+if(action==='install'){const c=collect().options.cleanup;const del=c.inbox.length||c.spam.length||c.trash.length||c.gmail_sent;
+if(del&&!confirm('ACHTUNG: Ausgewählte Mails werden täglich beim Anbieter ENDGÜLTIG gelöscht. Trotzdem fortfahren?'))return;
+const bk=collect().options.backup;
+if(bk.enabled&&bk.format&&!confirm('ACHTUNG: '+bk.device+' wird FORMATIERT, alle Daten darauf gehen verloren. Fortfahren?'))return;
+if(!confirm('Installation jetzt starten? Das kann bei großen Postfächern Stunden dauern.'))return}
 const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...collect()})});
 const j=await r.json();if(!r.ok){$('err').textContent=(j.errors||[j.error||'Fehler']).join('\\n');return}
 $('logcard').style.display='block';$('log').textContent='';$('status').textContent='läuft …';$('after').style.display='none';$('credbox').style.display='none';
@@ -261,6 +364,16 @@ if(j.done){$('status').textContent=j.rc===0?'Fertig.':'Beendet mit Fehlercode '+
 $('add').onclick=acc;$('check').onclick=()=>start('check');$('install').onclick=()=>start('install');
 $('creds').onclick=async()=>{const r=await fetch('/api/creds');const t=await r.text();const b=$('credbox');b.textContent=t;b.style.display='block'};
 $('quit').onclick=async()=>{await fetch('/api/quit',{method:'POST'});document.body.innerHTML='<main><div class="card">Der Assistent wurde beendet. Dieses Fenster kann geschlossen werden.</div></main>'};
+async function devs(){const L=$('bk_list');L.textContent='Suche Datenträger …';
+try{const j=await (await fetch('/api/devices')).json();L.textContent='';
+if(!j.devices.length){L.textContent=j.error?('Fehler: '+j.error):'Kein geeigneter USB-Datenträger gefunden. Stick anstecken und „Liste aktualisieren“ klicken.';return}
+j.devices.forEach(d=>{const l=document.createElement('label');l.style.cssText='display:block;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;color:var(--fg)';
+const r=document.createElement('input');r.type='radio';r.name='bkdev';r.value=d.path;r.dataset.keeps=d.keeps_data?'1':'0';r.style.width='auto';r.onchange=fmtbox;
+l.appendChild(r);l.appendChild(document.createTextNode(' '+d.path+'  '+d.size_h+'  '+d.model+'  ('+(d.fstype||'ohne Dateisystem')+(d.label?', Name: '+d.label:'')+')'+(d.mountpoints.length?' [eingehängt: '+d.mountpoints.join(', ')+', wird ausgehängt]':'')));
+if(d.note){const n=document.createElement('div');n.className='hint';n.textContent=d.note;l.appendChild(n)}L.appendChild(l)})}catch(e){L.textContent='Fehler beim Lesen der Datenträger.'}}
+function fmtbox(){const s=document.querySelector('input[name=bkdev]:checked');$('bk_fmt').style.display=s?'block':'none';if(!s)return;
+$('bk_dev').textContent=s.value;if(s.dataset.keeps==='0'){$('bk_format').checked=true;$('bk_format').disabled=true}else{$('bk_format').disabled=false}}
+$('bk_on').onchange=()=>{$('bk_box').style.display=$('bk_on').checked?'block':'none';if($('bk_on').checked)devs()};$('bk_refresh').onclick=devs;
 acc();
 </script></main>""".replace("__CSS__", PAGE_CSS)
 
@@ -315,6 +428,11 @@ class Handler(BaseHTTPRequestHandler):
                 frm = 0
             lines = job["lines"][frm:]
             return self._json(200, {"lines": lines, "next": frm + len(lines), "done": job["done"] and frm + len(lines) >= len(job["lines"]), "rc": job["rc"]})
+        if u.path == "/api/devices":
+            try:
+                return self._json(200, {"devices": usb_candidates()})
+            except (SystemExit, Exception) as e:  # noqa: BLE001
+                return self._json(200, {"devices": [], "error": str(e)})
         if u.path == "/api/creds":
             try:
                 with open(CREDS, encoding="utf-8") as f:
@@ -359,13 +477,15 @@ class Handler(BaseHTTPRequestHandler):
             if S.job and not S.job["done"]:
                 return self._json(409, {"error": "Es läuft bereits ein Vorgang."})
             text, errors = validate(data)
+            backup, berrors = validate_backup(data) if action == "install" else (None, [])
+            errors += berrors
             if errors:
                 return self._json(400, {"errors": errors})
             try:
                 write_conf(text)
             except OSError as e:
                 return self._json(500, {"error": f"accounts.conf konnte nicht geschrieben werden: {e}"})
-            run_job(action)
+            run_job(action, backup)
             return self._json(200, {"ok": True})
         self._send(404, "nicht gefunden", "text/plain; charset=utf-8")
 

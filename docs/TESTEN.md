@@ -23,6 +23,8 @@ sondern auf einem Entwicklungsrechner oder in einer Test-VM.
 | Domain und Tunnel | Let's Encrypt, DDNS und Tunnel; Token nur in `.env`; Cron mit festem Tag |
 | Installationsassistent | komplette Dialogfolge mit Fehleingabe und Anbieter-Abgleich; die erzeugte `accounts.conf` versteht `setup-mailserver.sh` |
 | Backup | Ablehnung von `KEEP_DAYS=0`, Ziel in der Quelle, gleiches Laufwerk, Parallellauf; Snapshots, Löschen alter Snapshots nach KEEP_DAYS, `latest`, Rechte, Cron-Zeile, logrotate |
+| Aufräumen beim Anbieter | je Anbieter: Auswahl, Probelauf, Altersgrenze, Gmail-Posteingang erst nach Import, Message-ID-Abgleich, Papierkorb/Spam, Fehler und fehlende Ordner (`tests/test_cleanup.py` mit nachgebautem IMAP-Server) |
+| USB-Backup | nur USB-Datenträger (nie System-/interne Platte, nie ein Stick mit laufendem System), ungültige Namen, NTFS nur nach `--format`, fstab (UUID, nofail), Aushängen, Cron mit `REQUIRE_MOUNT`, `--remove` (`tests/fixtures/lsblk.json`, Platzhalter für mount/mkfs/blkid) |
 | Web-Oberfläche | Anmeldung, Passwortsperre, Eingabeprüfung, accounts.conf (Rechte, Sicherung), Protokoll mit Exit-Code, Beenden (`tests/test_webui.py`, mit Platzhalter-Setup) |
 | Deinstallation | entfernt Konfiguration, Cron und Container, **lässt `data/` ohne ausdrückliche Auswahl unberührt** |
 

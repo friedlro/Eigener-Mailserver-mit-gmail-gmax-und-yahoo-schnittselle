@@ -12,7 +12,8 @@
 #   ./setup-mailserver.sh --update      BESTEHENDES System aktualisieren: neue Konfiguration
 #                                       und Container, aber KEIN Import, Abholung läuft weiter
 #   ./setup-mailserver.sh --reimport    Import erzwingen (z. B. nach abgebrochenem alten Import)
-#   ./setup-mailserver.sh --cleanup     Gmail aufräumen (Papierkorb/Gesendet laut accounts.conf)
+#   ./setup-mailserver.sh --cleanup     beim Anbieter aufräumen: Posteingang/Spam/Papierkorb laut accounts.conf
+#   ./setup-mailserver.sh --cleanup --dry-run   dasselbe als Probelauf (zählt nur, löscht nichts)
 #   ./setup-mailserver.sh --empty-trash Gmail-Papierkorb sofort leeren
 #   -y                                  ohne Rückfrage (mit allen Modi kombinierbar)
 #
@@ -37,7 +38,7 @@ die()  { printf '\n\033[31mFehler: %s\033[0m\n' "$*" >&2; exit 1; }
 dq()   { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }
 
 # ---------------------------------------------------------------- Optionen
-ASSUME_YES=0; MODE="install"; REIMPORT=0
+ASSUME_YES=0; MODE="install"; REIMPORT=0; DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
     -y) ASSUME_YES=1 ;;
@@ -46,6 +47,7 @@ for arg in "$@"; do
     --reimport) REIMPORT=1 ;;
     --cleanup) MODE="cleanup" ;;
     --empty-trash) MODE="empty-trash" ;;
+    --dry-run) DRY_RUN=1 ;;
     -h|--help) sed -n '2,/^$/p' "$SELF"; exit 0 ;;
     *) die "Unbekannte Option: $arg  (siehe --help)" ;;
   esac
@@ -106,6 +108,7 @@ DOMAIN=""; CF_API_TOKEN=""; CF_TUNNEL_TOKEN=""; LE_EMAIL=""
 WEBMAIL_PORT="8080"; WEBMAIL_BIND="0.0.0.0"; DDNS="1"; IMPORT_MODE="ordner"
 GMAIL_EMPTY_TRASH="0"; GMAIL_TRASH_DAYS="0"; GMAIL_EMPTY_SPAM="0"
 GMAIL_EMPTY_SENT="0"; GMAIL_SENT_DAYS="0"
+CLEAN_INBOX=""; CLEAN_SPAM=""; CLEAN_TRASH=""; CLEAN_DAYS=""
 TZ_VAL="$(cat /etc/timezone 2>/dev/null || echo Europe/Vienna)"
 ENTRIES=()
 
@@ -129,6 +132,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       GMAIL_EMPTY_SPAM) GMAIL_EMPTY_SPAM="$val" ;;
       GMAIL_EMPTY_SENT) GMAIL_EMPTY_SENT="$val" ;;
       GMAIL_SENT_DAYS) GMAIL_SENT_DAYS="$val" ;;
+      CLEAN_INBOX) CLEAN_INBOX="$val" ;;
+      CLEAN_SPAM) CLEAN_SPAM="$val" ;;
+      CLEAN_TRASH) CLEAN_TRASH="$val" ;;
+      CLEAN_DAYS) CLEAN_DAYS="$val" ;;
       TIMEZONE) TZ_VAL="$val" ;;
       DMS_TAG) DMS_TAG="$val" ;;
       ROUNDCUBE_TAG) ROUNDCUBE_TAG="$val" ;;
@@ -147,6 +154,30 @@ done < "$CONF"
 [[ "$IMPORT_MODE" == "ordner" || "$IMPORT_MODE" == "alles" ]] || die "IMPORT_MODE muss 'ordner' oder 'alles' sein (ist: $IMPORT_MODE)."
 [[ "$GMAIL_TRASH_DAYS" =~ ^[0-9]+$ ]] || die "GMAIL_TRASH_DAYS muss eine Zahl sein (0 = sofort)."
 [[ "$GMAIL_SENT_DAYS" =~ ^[0-9]+$ ]] || die "GMAIL_SENT_DAYS muss eine Zahl sein (0 = alle)."
+# Aufräumen beim Anbieter: Listen wie "gmail,gmx,yahoo" (oder "alle"), mit den älteren GMAIL_*-Einstellungen vereint
+norm_list() {   # $1 = Name der Einstellung  $2 = Wert  -> normalisierte, sortierte Liste
+  local v="${2,,}" item out=()
+  v="${v//[[:space:]]/}"; [[ "$v" != "alle" ]] || v="gmail,gmx,yahoo"
+  local IFS=','
+  for item in $v; do
+    [[ -z "$item" ]] && continue
+    [[ "$item" == "gmail" || "$item" == "gmx" || "$item" == "yahoo" ]] || die "$1: '$item' ist kein Anbieter (erlaubt: gmail, gmx, yahoo oder alle)."
+    out+=("$item")
+  done
+  [[ ${#out[@]} -eq 0 ]] || printf '%s\n' "${out[@]}" | sort -u | paste -sd, -
+}
+add_prov() {   # $1 = Liste  $2 = Anbieter
+  [[ ",$1," == *",$2,"* ]] && { echo "$1"; return; }
+  [[ -n "$1" ]] && echo "$1,$2" || echo "$2"
+}
+in_list() { [[ ",$1," == *",$2,"* ]]; }
+[[ "$GMAIL_EMPTY_TRASH" != "1" ]] || CLEAN_TRASH="$(add_prov "$CLEAN_TRASH" gmail)"
+[[ "$GMAIL_EMPTY_SPAM" != "1" ]]  || CLEAN_SPAM="$(add_prov "$CLEAN_SPAM" gmail)"
+CLEAN_INBOX="$(norm_list CLEAN_INBOX "$CLEAN_INBOX")"; CLEAN_SPAM="$(norm_list CLEAN_SPAM "$CLEAN_SPAM")"; CLEAN_TRASH="$(norm_list CLEAN_TRASH "$CLEAN_TRASH")"
+[[ -n "$CLEAN_DAYS" ]] || CLEAN_DAYS="$GMAIL_TRASH_DAYS"
+[[ "$CLEAN_DAYS" =~ ^[0-9]+$ ]] || die "CLEAN_DAYS muss eine Zahl sein (0 = alle, sonst nur Mails älter als N Tage)."
+CLEAN_ANY=0
+[[ -n "$CLEAN_INBOX$CLEAN_SPAM$CLEAN_TRASH" || "$GMAIL_EMPTY_SENT" == "1" ]] && CLEAN_ANY=1
 [[ "$WEBMAIL_PORT" =~ ^[0-9]{1,5}$ ]] || die "WEBMAIL_PORT muss eine Portnummer sein (ist: $WEBMAIL_PORT)."
 [[ "$WEBMAIL_BIND" =~ ^[0-9.]+$ ]] || die "WEBMAIL_BIND muss eine IPv4-Adresse sein, z. B. 0.0.0.0 oder 127.0.0.1 (ist: $WEBMAIL_BIND)."
 [[ "$DDNS" == "0" || "$DDNS" == "1" ]] || die "DDNS muss 0 oder 1 sein (ist: $DDNS)."
@@ -232,129 +263,58 @@ import_state() {   # $1 = lokale Adresse, $2 = Postfach-Ordner
   else echo fresh; fi
 }
 
-# Löscht bei Gmail ENDGÜLTIG (nicht rückgängig zu machen):
-#   - den Papierkorb (und optional Spam)                                 [$1 = 1]
-#   - den Ordner "Gesendet": erst in den Papierkorb verschieben          [$2 = 1]
-# Gilt nur für Gmail-Konten. GMX und Yahoo werden nicht aufgeräumt: Die Abholung per POP3 löscht
-# neue Mails dort ohnehin, und ihre Ordnernamen sind nicht einheitlich genug für ein sicheres Löschen.
-# Schutz: Ein Konto wird übersprungen, solange lokal noch keine Mails liegen. "Gesendet" wird
-# zusätzlich nur bereinigt, wenn der Import des Kontos abgeschlossen ist.
-gmail_cleanup() {   # $1 = Papierkorb leeren (1/0), $2 = Gesendet bereinigen (1/0)
+# Löscht beim Anbieter ENDGÜLTIG (nicht rückgängig zu machen), je Anbieter wählbar:
+#   CLEAN_INBOX  Posteingang: nur Mails, die lokal NACHWEISLICH vorhanden sind (Message-ID-Abgleich)
+#   CLEAN_SPAM   Spam-Ordner leeren          CLEAN_TRASH  Papierkorb leeren
+#   GMAIL_EMPTY_SENT  Gmail: "Gesendet" in den Papierkorb verschieben
+# Die Arbeit macht cleanup.py in einem Container (siehe dort die Schutzregeln). Ein Konto wird übersprungen,
+# solange lokal noch keine Mails liegen; bei Gmail wird der Posteingang erst nach abgeschlossenem Import bereinigt.
+provider_cleanup() {   # $1 = 1: Papierkorb bei allen Anbietern leeren (--empty-trash)
   command -v docker >/dev/null || die "Docker fehlt."
-  local i A U D T S do_trash do_sent
+  [[ -f "$BASE/cleanup.py" ]] || die "cleanup.py fehlt im Ordner $BASE."
+  local i A U D T prov ci cs ct se S
   for i in "${!L_ADDR[@]}"; do
-    [[ "${G_PROV[$i]}" == "gmail" ]] || continue
+    prov="${G_PROV[$i]}"; ci=0; cs=0; ct=0; se=0
+    in_list "$CLEAN_INBOX" "$prov" && ci=1
+    in_list "$CLEAN_SPAM" "$prov" && cs=1
+    { in_list "$CLEAN_TRASH" "$prov" || [[ "${1:-0}" == "1" ]]; } && ct=1
+    [[ "$prov" == "gmail" && "$GMAIL_EMPTY_SENT" == "1" ]] && se=1
+    (( ci || cs || ct || se )) || continue
     A="${L_ADDR[$i]}"; U="${A%@*}"; D="${A#*@}"; T="$BASE/data/mail-data/$D/$U"
-    do_trash="$1"; do_sent="$2"
+    echo "  ${G_MAIL[$i]} (${PROV_NAME[$prov]}):"
     if [[ -z "$(find "$T" -type f \( -path '*/cur/*' -o -path '*/new/*' \) -print -quit 2>/dev/null)" ]]; then
-      echo "  ${G_MAIL[$i]}: übersprungen (lokal noch keine Mails, erst Import prüfen)"
+      echo "    übersprungen (lokal noch keine Mails, erst Import prüfen)"
       continue
     fi
-    if [[ "$do_sent" == "1" ]]; then
+    if [[ "$prov" == "gmail" ]] && (( ci || se )); then
       S="$(import_state "$A" "$T")"
       if [[ "$S" != "done" && "$S" != "legacy" ]]; then
-        echo "  ${G_MAIL[$i]}: 'Gesendet' übersprungen (Import nicht abgeschlossen)"
-        do_sent=0
+        echo "    Posteingang und 'Gesendet' übersprungen (Import nicht abgeschlossen)"
+        ci=0; se=0
+        (( cs || ct )) || continue
       fi
     fi
-    [[ "$do_trash" == "1" || "$do_sent" == "1" ]] || continue
-    echo "  ${G_MAIL[$i]}:"
-    GM_USER="${G_MAIL[$i]}" GM_PASS="${G_PASS[$i]}" GM_DAYS="$GMAIL_TRASH_DAYS" GM_SPAM="$GMAIL_EMPTY_SPAM" \
-    GM_TRASH="$do_trash" GM_SENT="$do_sent" GM_SENT_DAYS="$GMAIL_SENT_DAYS" \
-    docker run --rm -i -e GM_USER -e GM_PASS -e GM_DAYS -e GM_SPAM -e GM_TRASH -e GM_SENT -e GM_SENT_DAYS \
-      python:3-alpine python -I - <<'PY' || echo "  Fehlgeschlagen für ${G_MAIL[$i]} (App-Passwort und IMAP prüfen)"
-import imaplib, os, re, datetime
-
-user, pw = os.environ["GM_USER"], os.environ["GM_PASS"]
-
-def num(key):
-    return int(os.environ.get(key, "0") or 0)
-
-trash_days, sent_days = num("GM_DAYS"), num("GM_SENT_DAYS")
-do_trash = os.environ.get("GM_TRASH") == "1"
-do_sent = os.environ.get("GM_SENT") == "1"
-do_spam = os.environ.get("GM_SPAM") == "1"
-
-M = imaplib.IMAP4_SSL("imap.gmail.com")
-M.login(user, pw)
-
-# Sonderordner über die IMAP-Kennzeichen finden (unabhängig von der Sprache)
-box = {}
-for raw in M.list()[1]:
-    line = raw.decode("utf-8", "replace")
-    m = re.match(r'\((?P<flags>[^)]*)\)\s+"(?P<sep>[^"]*)"\s+(?P<name>.+)$', line)
-    if not m:
-        continue
-    flags, name = m.group("flags"), m.group("name").strip().strip('"')
-    for key in ("Trash", "Sent", "Junk"):
-        if "\\" + key in flags:
-            box[key] = name
-
-def find(days):
-    if days > 0:
-        d = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%d-%b-%Y")
-        return M.search(None, "BEFORE", d)[1][0].split()
-    return M.search(None, "ALL")[1][0].split()
-
-def chunks(ids, n=500):
-    for i in range(0, len(ids), n):
-        yield b",".join(ids[i:i + n])
-
-# 1) Gesendet -> Papierkorb (die Kopie, die Gmail beim Senden über den Relay ablegt)
-if do_sent:
-    if "Sent" not in box or "Trash" not in box:
-        print("    Gesendet- oder Papierkorb-Ordner nicht gefunden, übersprungen")
-    elif M.select('"%s"' % box["Sent"])[0] != "OK":
-        print("    %s: nicht lesbar" % box["Sent"])
-    else:
-        moved = 0
-        for ch in chunks(find(sent_days)):
-            if M.copy(ch, '"%s"' % box["Trash"])[0] != "OK":
-                print("    Verschieben in den Papierkorb fehlgeschlagen, Abbruch")
-                break
-            M.store(ch, "+FLAGS", "\\Deleted")
-            moved += ch.count(b",") + 1
-        if moved:
-            M.expunge()
-        M.close()
-        print("    %s: %d Nachrichten in den Papierkorb verschoben" % (box["Sent"], moved))
-
-# 2) Papierkorb (und optional Spam) endgültig leeren
-if do_trash:
-    targets = []
-    if "Trash" in box:
-        targets.append(box["Trash"])
-    else:
-        print("    kein Papierkorb-Ordner gefunden")
-    if do_spam and "Junk" in box:
-        targets.append(box["Junk"])
-    for name in targets:
-        if M.select('"%s"' % name)[0] != "OK":
-            print("    %s: nicht lesbar" % name)
-            continue
-        ids = find(trash_days)
-        for ch in chunks(ids):
-            M.store(ch, "+FLAGS", "\\Deleted")
-        if ids:
-            M.expunge()
-        print("    %s: %d Nachrichten endgültig gelöscht" % (name, len(ids)))
-        M.close()
-
-M.logout()
-PY
+    CL_PROV="$prov" CL_USER="${G_MAIL[$i]}" CL_PASS="${G_PASS[$i]}" CL_HOST="$(prov_host imap "$prov" "${G_MAIL[$i]}")" \
+    CL_INBOX="$ci" CL_SPAM="$cs" CL_TRASH="$ct" CL_SENT="$se" CL_DAYS="$CLEAN_DAYS" CL_SENT_DAYS="$GMAIL_SENT_DAYS" \
+    CL_DRY="$DRY_RUN" CL_MAILDIR=/mail \
+    docker run --rm -i -v "$BASE/cleanup.py:/cleanup.py:ro" -v "$T:/mail:ro" \
+      -e CL_PROV -e CL_USER -e CL_PASS -e CL_HOST -e CL_INBOX -e CL_SPAM -e CL_TRASH -e CL_SENT -e CL_DAYS -e CL_SENT_DAYS -e CL_DRY -e CL_MAILDIR \
+      python:3.13-alpine python -I /cleanup.py || echo "    Fehlgeschlagen für ${G_MAIL[$i]} (Passwort und IMAP prüfen)"
   done
 }
 
-# Nur Gmail aufräumen, nichts installieren
+# Nur beim Anbieter aufräumen, nichts installieren
 #   --cleanup      = nach den Einstellungen in accounts.conf (das nutzt der tägliche Cron-Job)
-#   --empty-trash  = Papierkorb jetzt leeren, unabhängig von GMAIL_EMPTY_TRASH
+#   --empty-trash  = Papierkorb jetzt bei allen Anbietern leeren, unabhängig von CLEAN_TRASH
+#   --dry-run      = nur zählen, nichts löschen
 if [[ "$MODE" == "cleanup" || "$MODE" == "empty-trash" ]]; then
-  say "Gmail aufräumen ($(date '+%F %T'))"
-  if [[ "$MODE" == "empty-trash" ]]; then CT=1; else CT="$GMAIL_EMPTY_TRASH"; fi
-  if [[ "$CT" != "1" && "$GMAIL_EMPTY_SENT" != "1" ]]; then
-    echo "  Nichts zu tun (GMAIL_EMPTY_TRASH und GMAIL_EMPTY_SENT sind aus)."
+  say "Beim Anbieter aufräumen ($(date '+%F %T'))$( ((DRY_RUN)) && echo ' - PROBELAUF' )"
+  if [[ "$MODE" == "empty-trash" ]]; then
+    provider_cleanup 1
+  elif (( ! CLEAN_ANY )); then
+    echo "  Nichts zu tun (CLEAN_INBOX, CLEAN_SPAM, CLEAN_TRASH und GMAIL_EMPTY_SENT sind leer)."
   else
-    gmail_cleanup "$CT" "$GMAIL_EMPTY_SENT"
+    provider_cleanup 0
   fi
   exit 0
 fi
@@ -734,9 +694,9 @@ for A in "${L_ADDR[@]}"; do
   docker exec mailserver doveadm force-resync -u "$A" '*' || warn "Index für $A konnte nicht neu aufgebaut werden (docker logs mailserver)."
 done
 
-# ---------------------------------------------------------------- Täglicher Gmail-Aufräum-Job
-if [[ "$GMAIL_EMPTY_TRASH" == "1" || "$GMAIL_EMPTY_SENT" == "1" ]]; then
-  say "Täglicher Job: Gmail aufräumen (04:45 Uhr)"
+# ---------------------------------------------------------------- Täglicher Aufräum-Job (Anbieter)
+if (( CLEAN_ANY )); then
+  say "Täglicher Job: beim Anbieter aufräumen (04:45 Uhr)"
   echo "45 4 * * * root '$SELF' --cleanup >> /var/log/mail-gmail-cleanup.log 2>&1" > "$CRON_DIR/mailserver-gmail-cleanup"
 else
   rm -f "$CRON_DIR/mailserver-gmail-cleanup"
