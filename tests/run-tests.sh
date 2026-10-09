@@ -120,6 +120,9 @@ check "Relay Gmail"  has "$RM" "anna@home.lan [smtp.gmail.com]:587"
 check "Relay GMX"    has "$RM" "ben@home.lan [mail.gmx.net]:587"
 check "Relay Yahoo"  has "$RM" "clara@home.lan [smtp.mail.yahoo.com]:587"
 check "Relay GMX.com" has "$RM" "dirk@home.lan [mail.gmx.com]:587"
+GM="$D/data/config/postfix-generic.cf"
+check "Absender: lokale Adresse wird auf die Anbieter-Adresse umgeschrieben (GMX, Yahoo, Gmail)" bash -c "grep -qx 'ben@home.lan ben@gmx.de' '$GM' && grep -qx 'clara@home.lan clara@yahoo.com' '$GM' && grep -qx 'anna@home.lan anna@gmail.com' '$GM'"
+check "Absender: Postfix liest die Zuordnung (smtp_generic_maps)" has "$D/data/config/postfix-main.cf" "smtp_generic_maps = texthash:/tmp/docker-mailserver/postfix-generic.cf"
 check "SASL-Daten pro Konto" has "$SP" "ben@home.lan ben@gmx.de:GmxPass\"with\\back\$dollar'q"
 check "SASL-Datei hat Rechte 600" perm "$SP" 600
 check "6 lokale Konten angelegt" test "$(grep -c '@home.lan|' "$D/data/config/postfix-accounts.cf")" -eq 6
@@ -147,7 +150,9 @@ check "Roundcube: Zertifikatsprüfung bleibt an" hasnt "$D/data/roundcube/config
 if [[ -n "$REAL_DOCKER" ]]; then check "docker compose config: Datei ist gültig" compose_ok "$D"; else skip "docker nicht vorhanden (compose config)"; fi
 check "private Schlüsseldatei hat Rechte 600" perm "$D/data/certs/key.pem" 600
 
+echo "message_size_limit = 1234" >> "$D/data/config/postfix-main.cf"   # eigene Einstellung des Betreibers
 run "$D" bash setup-mailserver.sh -y
+check "zweiter Lauf: eigene Zeilen in postfix-main.cf bleiben, Absender-Zeile genau einmal" bash -c "grep -qx 'message_size_limit = 1234' '$D/data/config/postfix-main.cf' && [[ \$(grep -c '^smtp_generic_maps' '$D/data/config/postfix-main.cf') -eq 1 ]]"
 check "zweiter Lauf: Konten existieren schon" test "$(grep -c 'existiert bereits' "$D/out")" -eq 6
 check "zweiter Lauf: kein erneuter Import"    test "$(grep -c 'Import bereits abgeschlossen' "$D/out")" -eq 6
 check "zweiter Lauf: Exit-Code 0" test "$RC" -eq 0
@@ -155,6 +160,7 @@ check "zweiter Lauf: Exit-Code 0" test "$RC" -eq 0
 N_BEFORE="$(ls "$D"/stub.mbsync.* | wc -l)"
 run "$D" bash setup-mailserver.sh --update -y
 check "Update: Exit-Code 0" test "$RC" -eq 0
+check "Update: Mailserver wird neu gestartet (neue Relay-/Absender-Einstellungen gelten sofort)" has "$D/stub.args" "docker compose restart mailserver"
 check "Update: kein Import"  test "$(ls "$D"/stub.mbsync.* | wc -l)" -eq "$N_BEFORE"
 check "Update: Abholung bleibt an" has "$D/.env" "FETCHMAIL=1"
 
