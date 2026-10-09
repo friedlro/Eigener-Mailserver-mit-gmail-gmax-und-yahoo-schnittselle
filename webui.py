@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+from html import escape as html_escape
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -32,6 +33,9 @@ from urllib.parse import parse_qs, urlparse
 BASE = os.path.dirname(os.path.abspath(__file__))
 SETUP = os.environ.get("MAILSERVER_SETUP", os.path.join(BASE, "setup-mailserver.sh"))
 USB = os.environ.get("MAILSERVER_USB", os.path.join(BASE, "usb-backup.sh"))
+TS = os.environ.get("MAILSERVER_TS", os.path.join(BASE, "tailscale-setup.sh"))
+MCP = os.environ.get("MAILSERVER_MCP", os.path.join(BASE, "mcp", "install.sh"))
+TS_URL = re.compile(r"https://login\.tailscale\.com/[A-Za-z0-9/_?=&.%-]+")
 CONF = os.path.join(BASE, "accounts.conf")
 CREDS = os.path.join(BASE, "zugangsdaten.txt")
 IDLE_EXIT = int(os.environ.get("WEBUI_IDLE_EXIT", "900"))  # Sekunden ohne Zugriff nach Abschluss
@@ -82,6 +86,33 @@ def validate_backup(data):
     if errors:
         return None, errors
     return {"device": dev, "format": fmt, "keep_days": days, "first_run": bool(b.get("first_run"))}, []
+
+
+def validate_mcp(data):
+    """Prüft die Auswahl für Tailscale und MCP-Server. Gibt (Plan oder None, Fehlerliste) zurück."""
+    o = data.get("options") or {}
+    m = o.get("mcp") or {}
+    if not isinstance(m, dict):
+        m = {}
+    ts = bool(m.get("tailscale"))
+    plan = {"tailscale": ts, "ssh": bool(m.get("ssh", True)), "mcp": bool(m.get("enabled")), "user": ""}
+    errors = []
+    if plan["mcp"]:
+        import pwd
+        user = clean(m.get("user"))
+        if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", user):
+            errors.append("MCP-Server: Benutzername für die SSH-Anmeldung fehlt oder ist ungültig.")
+        else:
+            try:
+                pwd.getpwnam(user)
+            except KeyError:
+                errors.append(f"MCP-Server: Den Benutzer '{user}' gibt es auf diesem Server nicht.")
+        if user == "root":
+            errors.append("MCP-Server: Bitte einen normalen Benutzer wählen, nicht root.")
+        plan["user"] = user
+    if not (plan["tailscale"] or plan["mcp"]):
+        return None, errors
+    return plan, errors
 
 
 class State:
@@ -227,9 +258,9 @@ def write_conf(text):
     os.chmod(CONF, 0o600)
 
 
-def run_job(action, backup=None):
+def run_job(action, backup=None, extras=None):
     args = ["bash", SETUP] + (["--check"] if action == "check" else ["-y"])
-    job = {"action": action, "lines": [], "done": False, "rc": None}
+    job = {"action": action, "lines": [], "done": False, "rc": None, "extras": extras if action == "install" else None}
     S.job = job
 
     def run_step(cmd):
@@ -241,7 +272,24 @@ def run_job(action, backup=None):
 
     def worker():
         try:
+            if extras and extras["tailscale"] and action == "install":
+                job["lines"].append("=== Tailscale einrichten ===")
+                cmd = ["bash", TS, "--timeout", "300"] + (["--ssh"] if extras["ssh"] else [])
+                if run_step(cmd) != 0:
+                    job["lines"].append("Tailscale ist NICHT eingerichtet (siehe oben). Die Installation läuft weiter. "
+                                        "Später nachholen: sudo ./tailscale-setup.sh --ssh")
+                job["lines"].append("")
             job["rc"] = run_step(args)
+            if job["rc"] == 0 and extras and extras["mcp"] and action == "install":
+                job["lines"].append("")
+                job["lines"].append("=== MCP-Server installieren ===")
+                env = dict(os.environ, SKIP_TAILSCALE="1", SUDO_USER=extras["user"])
+                rc = subprocess.run(["bash", MCP, BASE], cwd=BASE, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace")
+                job["lines"] += [ANSI.sub("", ln) for ln in rc.stdout.splitlines()]
+                if rc.returncode != 0:
+                    job["lines"].append("Der MCP-Server konnte NICHT installiert werden (siehe oben). Später: sudo bash mcp/install.sh " + BASE)
+                    job["rc"] = rc.returncode
             if job["rc"] == 0 and backup and action == "install":
                 job["lines"].append("")
                 job["lines"].append("=== Backup auf USB-Datenträger einrichten ===")
@@ -309,6 +357,13 @@ Mit <code>sudo /opt/mailserver/setup-mailserver.sh --cleanup --dry-run</code> si
 <tr><td>Papierkorb</td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="gmail" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="gmx" style="width:auto"></td><td align="center"><input type="checkbox" class="cl" data-k="trash" data-p="yahoo" style="width:auto"></td></tr></table>
 <div class="row"><div><label>Nur Mails älter als (Tage, 0 = alle)</label><input id="cl_days" value="0" inputmode="numeric"></div></div>
 <label><input type="checkbox" id="cl_sent" style="width:auto"> Gmail: Ordner „Gesendet“ in den Papierkorb verschieben</label></div>
+<div class="card"><h2>Fernzugriff und MCP-Server (optional)</h2>
+<label><input type="checkbox" id="ts_on" style="width:auto"> Tailscale installieren und einrichten (sicherer Zugriff von unterwegs ohne Portfreigabe)</label>
+<label><input type="checkbox" id="ts_ssh" checked style="width:auto"> Tailscale SSH einschalten (Anmeldung ohne SSH-Schlüssel)</label>
+<label><input type="checkbox" id="mcp_on" style="width:auto"> MCP-Server installieren (ein KI-Assistent wie Claude kann den Mailserver prüfen und verwalten)</label>
+<div id="mcp_box" style="display:none"><p class="hint">Der MCP-Server läuft über SSH, es wird kein Port geöffnet. Er braucht einen normalen Benutzer mit Docker-Zugriff auf diesem Server.</p>
+<div class="row"><div><label>Benutzer für die SSH-Anmeldung</label><input id="mcp_user" value="__SUDOUSER__" autocomplete="off"></div></div></div>
+<p class="hint">Der Anmeldelink von Tailscale erscheint beim Installieren hier im Protokoll. Du bestätigst ihn im Browser.</p></div>
 <div class="card"><h2>Backup auf USB-Datenträger (optional)</h2>
 <label><input type="checkbox" id="bk_on" style="width:auto"> Backup auf einen angesteckten USB-Datenträger einrichten und den täglichen Job (03:30 Uhr) starten</label>
 <div id="bk_box" style="display:none"><p class="hint">Angeboten werden nur USB-Datenträger, nie die Systemplatte. Ein vorhandenes Linux-Dateisystem (ext4, xfs, btrfs) wird weiterverwendet, ohne etwas zu löschen. Sicherungen älter als die gewählten Tage werden automatisch gelöscht.</p>
@@ -327,7 +382,9 @@ Mit <code>sudo /opt/mailserver/setup-mailserver.sh --cleanup --dry-run</code> si
 </details></div>
 <div class="bar"><button type="button" id="check" class="sec">Zugangsdaten prüfen</button><button type="button" id="install">Installieren</button></div>
 <p class="err" id="err"></p></form>
-<div class="card" id="logcard" style="display:none"><h2 id="logtitle">Protokoll</h2><pre id="log"></pre><p id="status"></p>
+<div class="card" id="logcard" style="display:none"><h2 id="logtitle">Protokoll</h2>
+<div id="tsbox" class="card" style="display:none;border-color:var(--acc)"><b>Tailscale-Anmeldung</b><p class="hint">Diesen Link im Browser öffnen und die Anmeldung bestätigen. Die Installation wartet bis zu 5 Minuten darauf.</p><div id="tslinks"></div></div>
+<div id="connbox" class="card" style="display:none;border-color:var(--ok)"><b>Verbindung per Tailscale</b><div id="conninfo" class="hint"></div><pre id="connjson"></pre></div><pre id="log"></pre><p id="status"></p>
 <div class="bar" id="after" style="display:none"><button type="button" class="sec" id="creds">Zugangsdaten anzeigen</button><button type="button" class="sec" id="quit">Assistent beenden</button></div>
 <pre id="credbox" style="display:none"></pre></div>
 <script>
@@ -343,6 +400,7 @@ function collect(){const accounts=[...document.querySelectorAll('.acc')].map(d=>
 provider:d.querySelector('.v').value,local:d.querySelector('.l').value,localpw:d.querySelector('.lp').value,quota:d.querySelector('.q').value})).filter(a=>a.address.trim()||a.password||a.local.trim()||a.localpw||a.quota.trim());
 const o={};['webmail_port','webmail_bind','import_mode','timezone','domain','cf_api_token','le_email','cf_tunnel_token'].forEach(k=>o[k]=$(k).value);
 const sel=document.querySelector('input[name=bkdev]:checked');
+o.mcp={tailscale:$('ts_on').checked||$('mcp_on').checked,ssh:$('ts_ssh').checked,enabled:$('mcp_on').checked,user:$('mcp_user').value};
 o.backup={enabled:$('bk_on').checked,device:sel?sel.value:'',format:$('bk_format').checked||(sel&&sel.dataset.keeps==='0'),confirm:$('bk_confirm').value,keep_days:$('bk_days').value,first_run:$('bk_first').checked};
 o.ddns=$('ddns').checked;const cl={inbox:[],spam:[],trash:[],days:$('cl_days').value,gmail_sent:$('cl_sent').checked,sent_days:$('cl_days').value};
 document.querySelectorAll('.cl:checked').forEach(c=>cl[c.dataset.k].push(c.dataset.p));o.cleanup=cl;return {accounts,options:o}}
@@ -358,6 +416,10 @@ const j=await r.json();if(!r.ok){$('err').textContent=(j.errors||[j.error||'Fehl
 $('logcard').style.display='block';$('log').textContent='';$('status').textContent='läuft …';$('after').style.display='none';$('credbox').style.display='none';
 $('logtitle').textContent=action==='check'?'Zugangsdaten werden geprüft':'Installation';pos=0;['check','install'].forEach(i=>$(i).disabled=true);poll();$('logcard').scrollIntoView()}
 async function poll(){const r=await fetch('/api/log?from='+pos);if(r.status===401){location.reload();return}const j=await r.json();
+if(j.links&&j.links.length){const b=$('tsbox'),L=$('tslinks');b.style.display='block';L.textContent='';j.links.forEach(u=>{if(!/^https:\\/\\/login\\.tailscale\\.com\\//.test(u))return;const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';a.textContent=u;a.style.wordBreak='break-all';L.appendChild(a);L.appendChild(document.createElement('br'))})}
+if(j.info&&j.info.ip){$('tsbox').style.display=j.info.ip?'none':'block';const c=$('connbox');c.style.display='block';
+$('conninfo').textContent='Tailscale-Adresse: '+j.info.ip+(j.info.name?'  (Name: '+j.info.name+')':'');
+if(j.mcp&&j.mcp.user){$('connjson').textContent=JSON.stringify({mcpServers:{mailserver:{command:'ssh',args:['-T','-o','BatchMode=yes',j.mcp.user+'@'+j.info.ip,'python3',j.mcp.path]}}},null,2);$('connjson').style.display='block'}else{$('connjson').style.display='none'}}
 if(j.lines.length){const el=$('log');el.textContent+=j.lines.join('\\n')+'\\n';el.scrollTop=el.scrollHeight;pos=j.next}
 if(j.done){$('status').textContent=j.rc===0?'Fertig.':'Beendet mit Fehlercode '+j.rc+' (siehe Protokoll).';$('status').className=j.rc===0?'ok':'err';
 ['check','install'].forEach(i=>$(i).disabled=false);$('after').style.display='flex';return}timer=setTimeout(poll,1000)}
@@ -373,6 +435,7 @@ l.appendChild(r);l.appendChild(document.createTextNode(' '+d.path+'  '+d.size_h+
 if(d.note){const n=document.createElement('div');n.className='hint';n.textContent=d.note;l.appendChild(n)}L.appendChild(l)})}catch(e){L.textContent='Fehler beim Lesen der Datenträger.'}}
 function fmtbox(){const s=document.querySelector('input[name=bkdev]:checked');$('bk_fmt').style.display=s?'block':'none';if(!s)return;
 $('bk_dev').textContent=s.value;if(s.dataset.keeps==='0'){$('bk_format').checked=true;$('bk_format').disabled=true}else{$('bk_format').disabled=false}}
+$('mcp_on').onchange=()=>{$('mcp_box').style.display=$('mcp_on').checked?'block':'none';if($('mcp_on').checked)$('ts_on').checked=true};
 $('bk_on').onchange=()=>{$('bk_box').style.display=$('bk_on').checked?'block':'none';if($('bk_on').checked)devs()};$('bk_refresh').onclick=devs;
 acc();
 </script></main>""".replace("__CSS__", PAGE_CSS)
@@ -415,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
         S.last_seen = time.time()
         u = urlparse(self.path)
         if u.path == "/":
-            return self._send(200, APP if self._authed() else LOGIN % (PAGE_CSS, ""))
+            return self._send(200, APP.replace("__SUDOUSER__", html_escape(os.environ.get("SUDO_USER", ""))) if self._authed() else LOGIN % (PAGE_CSS, ""))
         if not self._authed():
             return self._json(401, {"error": "nicht angemeldet"})
         if u.path == "/api/log":
@@ -427,7 +490,21 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 frm = 0
             lines = job["lines"][frm:]
-            return self._json(200, {"lines": lines, "next": frm + len(lines), "done": job["done"] and frm + len(lines) >= len(job["lines"]), "rc": job["rc"]})
+            alle = list(job["lines"])
+            links = []
+            for ln in alle:
+                for u in TS_URL.findall(ln):
+                    if u not in links:
+                        links.append(u)
+            info = {}
+            for ln in alle:
+                for key, name in (("Tailscale-IP: ", "ip"), ("Tailscale-Name: ", "name")):
+                    if ln.startswith(key):
+                        info[name] = ln[len(key):].strip()
+            x = job.get("extras") or {}
+            return self._json(200, {"lines": lines, "next": frm + len(lines), "done": job["done"] and frm + len(lines) >= len(job["lines"]), "rc": job["rc"],
+                                    "links": links, "info": info,
+                                    "mcp": {"user": x.get("user"), "path": os.path.join(BASE, "mcp", "server.py")} if x.get("mcp") else None})
         if u.path == "/api/devices":
             try:
                 return self._json(200, {"devices": usb_candidates()})
@@ -479,13 +556,15 @@ class Handler(BaseHTTPRequestHandler):
             text, errors = validate(data)
             backup, berrors = validate_backup(data) if action == "install" else (None, [])
             errors += berrors
+            extras, merrors = validate_mcp(data) if action == "install" else (None, [])
+            errors += merrors
             if errors:
                 return self._json(400, {"errors": errors})
             try:
                 write_conf(text)
             except OSError as e:
                 return self._json(500, {"error": f"accounts.conf konnte nicht geschrieben werden: {e}"})
-            run_job(action, backup)
+            run_job(action, backup, extras)
             return self._json(200, {"ok": True})
         self._send(404, "nicht gefunden", "text/plain; charset=utf-8")
 

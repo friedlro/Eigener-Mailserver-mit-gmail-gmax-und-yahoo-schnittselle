@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test-Platzhalter für tailscale: Zustand steht in der Datei $STUB_TS_STATE ("in" = angemeldet, sonst abgemeldet).
+LOG="${STUB_LOG:?STUB_LOG fehlt}"
+printf 'tailscale %s\n' "$*" >> "$LOG.ts"
+state="$(cat "${STUB_TS_STATE:-/nonexistent}" 2>/dev/null || echo out)"
+case "${1:-}" in
+  status)
+    [[ "$state" == "in" ]] || { echo "Logged out." >&2; exit 1; }
+    if [[ "${2:-}" == "--json" ]]; then echo '{"Self":{"DNSName":"testserver.tail1234.ts.net."}}'; else echo "100.64.1.2 testserver"; fi ;;
+  up)
+    if [[ "$state" != "in" ]]; then
+      printf '\nTo authenticate, visit:\n\n\thttps://login.tailscale.com/a/abc123XYZ\n\n' >&2
+      echo in > "$STUB_TS_STATE"
+    fi ;;
+  ip) echo "100.64.1.2" ;;
+  set) ;;
+esac
+exit 0

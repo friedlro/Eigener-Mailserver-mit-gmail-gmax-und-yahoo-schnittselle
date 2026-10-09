@@ -95,6 +95,8 @@ Die Seite ist **nicht verschlüsselt** (HTTP): nur im Heimnetz oder über Tailsc
 `http://localhost:8099`. Nach 5 falschen Passwörtern beendet sich der Server, nach der Installation auch von selbst.
 Später erneut starten: `sudo python3 /opt/mailserver/webui.py`.
 
+Die Web-Oberfläche richtet auf Wunsch auch **Tailscale** (mit Anmeldelink im Browser), den **MCP-Server** und das **USB-Backup** ein und kann Mails beim Anbieter automatisch löschen (siehe docs/MCP.md und docs/BETRIEB.md).
+
 Alternativ mit git:
 
 ```bash
