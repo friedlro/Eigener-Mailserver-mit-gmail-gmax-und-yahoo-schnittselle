@@ -82,6 +82,19 @@ curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubuserconten
 unset GITHUB_TOKEN
 ```
 
+**Im Browser statt im Terminalmenü** (wenn der Assistent hängt oder die Konsole keine Menüs darstellt, z. B. Webkonsolen und Handy-SSH):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash -s -- --web
+```
+
+Im Terminal erscheinen eine Adresse (`http://<server-ip>:8099`) und ein Einmal-Passwort. Im Browser trägst du die Konten ein
+(Anbieter wird an der Adresse erkannt, auch gmx.at), prüfst die Zugangsdaten und startest die Installation. Das Protokoll läuft live mit.
+Die Seite ist **nicht verschlüsselt** (HTTP): nur im Heimnetz oder über Tailscale benutzen. Sicherer ist ein SSH-Tunnel: Starte mit
+`... | sudo env WEBUI_BIND=127.0.0.1 bash -s -- --web`, öffne auf deinem Rechner `ssh -L 8099:localhost:8099 user@server` und im Browser
+`http://localhost:8099`. Nach 5 falschen Passwörtern beendet sich der Server, nach der Installation auch von selbst.
+Später erneut starten: `sudo python3 /opt/mailserver/webui.py`.
+
 Alternativ mit git:
 
 ```bash

@@ -3,6 +3,7 @@
 #
 # Nutzung:
 #   curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash
+#   ... | sudo bash -s -- --web     Installation im Browser statt im Terminalmenü (Adresse und Passwort erscheinen im Terminal)
 #
 # Einstellungen (Umgebungsvariablen, bei sudo mit "sudo env VAR=... bash"):
 #   MAILSERVER_DIR    Zielordner (Standard /opt/mailserver; vorhandene accounts.conf und data/ bleiben erhalten)
@@ -36,6 +37,10 @@ tar -xzf "$TMP" -C "$DEST" --strip-components=1
 chmod +x "$DEST"/*.sh
 
 cd "$DEST"
+if [[ "${1:-}" == "--web" || "${MAILSERVER_WEB:-0}" == "1" ]]; then
+  command -v python3 >/dev/null || { apt-get update -qq && apt-get install -y -qq python3; }
+  exec python3 ./webui.py </dev/null
+fi
 if [[ -r /dev/tty ]]; then
   exec bash ./install.sh </dev/tty
 fi

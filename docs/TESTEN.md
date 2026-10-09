@@ -23,6 +23,7 @@ sondern auf einem Entwicklungsrechner oder in einer Test-VM.
 | Domain und Tunnel | Let's Encrypt, DDNS und Tunnel; Token nur in `.env`; Cron mit festem Tag |
 | Installationsassistent | komplette Dialogfolge mit Fehleingabe und Anbieter-Abgleich; die erzeugte `accounts.conf` versteht `setup-mailserver.sh` |
 | Backup | Ablehnung von `KEEP_DAYS=0`, Ziel in der Quelle, gleiches Laufwerk, Parallellauf; Snapshots, Löschen alter Snapshots nach KEEP_DAYS, `latest`, Rechte, Cron-Zeile, logrotate |
+| Web-Oberfläche | Anmeldung, Passwortsperre, Eingabeprüfung, accounts.conf (Rechte, Sicherung), Protokoll mit Exit-Code, Beenden (`tests/test_webui.py`, mit Platzhalter-Setup) |
 | Deinstallation | entfernt Konfiguration, Cron und Container, **lässt `data/` ohne ausdrückliche Auswahl unberührt** |
 
 ## Was die automatischen Tests nicht abdecken
