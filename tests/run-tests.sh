@@ -321,6 +321,9 @@ else
   check "Aufbewahrung: Sicherung von vor 8 Tagen wird gelöscht" test "$(find "$B/daily" -maxdepth 1 -name "$(date -d '-8 days' +%Y-%m-%d)*" | wc -l)" -eq 0
   check "Aufbewahrung: Sicherung von vor 6 Tagen bleibt"      test "$(find "$B/daily" -maxdepth 1 -name "$(date -d '-6 days' +%Y-%m-%d)*" | wc -l)" -eq 1
   check "Aufbewahrung: neueste Sicherung bleibt"              test -d "$(readlink -f "$B/latest")"
+  B2="$W/bk-default"; mkdir -p "$B2"
+  run "$D" env ALLOW_SAME_DISK=1 bash backup-mail.sh "$B2"
+  check "Standard (ohne Monatssnapshots): Sicherung läuft durch" bash -c "[[ $RC -eq 0 ]] && [[ ! -e '$B2/monthly' || -z \"\$(ls -A '$B2/monthly')\" ]]"
   check "latest zeigt auf den neuesten Snapshot" test "$(readlink -f "$B/latest")" = "$(ls -d "$B"/daily/* | sort | tail -n1)"
   ( exec 9>"$D/lock"; flock -n 9; sleep 4 ) &
   PIDS+=("$!"); sleep 1

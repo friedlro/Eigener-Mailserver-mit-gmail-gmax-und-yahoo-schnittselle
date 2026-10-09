@@ -130,13 +130,17 @@ MONTH="$(date +%Y-%m)"
 # Alte Snapshots löschen (älter als KEEP_DAYS Tage; der neueste bleibt immer), unfertige Reste ebenfalls
 rm -rf "$DEST"/daily/*.partial
 CUTOFF="$(date -d "-$KEEP_DAYS days" +%Y-%m-%d_%H%M%S)"
-NEWEST="$(ls -1d "$DEST"/daily/* 2>/dev/null | sort | tail -n 1)"
+NEWEST="$(ls -1d "$DEST"/daily/* 2>/dev/null | sort | tail -n 1 || true)"
 for d in "$DEST"/daily/*; do
   [[ -d "$d" && "$d" != "$NEWEST" && "${d##*/}" < "$CUTOFF" ]] || continue
   echo "Lösche alte Sicherung: ${d##*/}"
   rm -rf "$d"
 done
-ls -1d "$DEST"/monthly/* 2>/dev/null | sort | head -n -"$KEEP_MONTHLY" | xargs -r rm -rf
+if [[ "$KEEP_MONTHLY" -eq 0 ]]; then
+  rm -rf "$DEST"/monthly/*
+else
+  ls -1d "$DEST"/monthly/* 2>/dev/null | sort | head -n -"$KEEP_MONTHLY" | xargs -r rm -rf
+fi
 
 trap - EXIT
 echo "[$(date '+%F %T')] Fertig."
