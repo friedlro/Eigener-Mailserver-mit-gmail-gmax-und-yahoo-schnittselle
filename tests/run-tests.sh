@@ -304,27 +304,31 @@ else
   D="$(new_instance backup)"
   mkdir -p "$D/data/mail-data/home.lan/anna/cur"; echo "Mail 1" > "$D/data/mail-data/home.lan/anna/cur/1"
   B="$W/backup-dest"
-  run "$D" env KEEP_DAILY=0 bash backup-mail.sh "$B"
-  check "KEEP_DAILY=0 wird abgelehnt"           bash -c "[[ $RC -ne 0 ]] && grep -q 'KEEP_DAILY' '$D/out'"
+  run "$D" env KEEP_DAYS=0 bash backup-mail.sh "$B"
+  check "KEEP_DAYS=0 wird abgelehnt"            bash -c "[[ $RC -ne 0 ]] && grep -q 'KEEP_DAYS' '$D/out'"
   run "$D" env ALLOW_SAME_DISK=1 bash backup-mail.sh "$D/bk"
   check "Ziel innerhalb der Quelle wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'innerhalb' '$D/out'"
   run "$D" bash backup-mail.sh "$B"
   check "gleiches Dateisystem wird abgelehnt"   bash -c "[[ $RC -ne 0 ]] && grep -q 'Dateisystem' '$D/out'"
-  run "$D" env ALLOW_SAME_DISK=1 bash backup-mail.sh "$B"
+  run "$D" env ALLOW_SAME_DISK=1 KEEP_MONTHLY=1 bash backup-mail.sh "$B"
   check "Sicherung läuft durch" test "$RC" -eq 0
   check "Snapshot enthält die Mail" test -f "$B/latest/data/mail-data/home.lan/anna/cur/1"
   check "Ziel hat Rechte 700" perm "$B" 700
   check "Monatssnapshot angelegt" test "$(ls "$B/monthly" | wc -l)" -eq 1
-  for _ in 1 2 3; do sleep 1; run "$D" env ALLOW_SAME_DISK=1 KEEP_DAILY=2 bash backup-mail.sh "$B"; done
-  check "Aufbewahrung: nur 2 Tages-Snapshots bleiben" test "$(ls "$B/daily" | wc -l)" -eq 2
+  mkdir -p "$B/daily/2020-01-01_000000" "$B/daily/$(date -d '-8 days' +%Y-%m-%d_%H%M%S)" "$B/daily/$(date -d '-6 days' +%Y-%m-%d_%H%M%S)"
+  sleep 1; run "$D" env ALLOW_SAME_DISK=1 bash backup-mail.sh "$B"
+  check "Aufbewahrung: Sicherung von 2020 wird gelöscht"      test ! -e "$B/daily/2020-01-01_000000"
+  check "Aufbewahrung: Sicherung von vor 8 Tagen wird gelöscht" test "$(find "$B/daily" -maxdepth 1 -name "$(date -d '-8 days' +%Y-%m-%d)*" | wc -l)" -eq 0
+  check "Aufbewahrung: Sicherung von vor 6 Tagen bleibt"      test "$(find "$B/daily" -maxdepth 1 -name "$(date -d '-6 days' +%Y-%m-%d)*" | wc -l)" -eq 1
+  check "Aufbewahrung: neueste Sicherung bleibt"              test -d "$(readlink -f "$B/latest")"
   check "latest zeigt auf den neuesten Snapshot" test "$(readlink -f "$B/latest")" = "$(ls -d "$B"/daily/* | sort | tail -n1)"
   ( exec 9>"$D/lock"; flock -n 9; sleep 4 ) &
   PIDS+=("$!"); sleep 1
   run "$D" env ALLOW_SAME_DISK=1 bash backup-mail.sh "$B"
   check "gleichzeitiger zweiter Lauf wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'bereits eine Sicherung' '$D/out'"
   mkdir -p "$D/cron" "$D/logrotate"
-  run "$D" env KEEP_DAILY=7 bash backup-mail.sh --install "$B"
-  check "--install: Cron-Zeile mit Aufbewahrung und Pfad" bash -c "grep -q 'KEEP_DAILY=7' '$D/cron/mail-backup' && grep -qF \"'$B'\" '$D/cron/mail-backup'"
+  run "$D" env KEEP_DAYS=7 bash backup-mail.sh --install "$B"
+  check "--install: Cron-Zeile mit Aufbewahrung und Pfad" bash -c "grep -q 'KEEP_DAYS=7' '$D/cron/mail-backup' && grep -qF \"'$B'\" '$D/cron/mail-backup'"
   check "--install: logrotate-Regel angelegt" test -f "$D/logrotate/mail-backup"
   run "$D" env HC_URL=http://unsicher bash backup-mail.sh --install "$B"
   check "--install: ungültige HC_URL wird abgelehnt" test "$RC" -ne 0
