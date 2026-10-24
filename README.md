@@ -88,6 +88,8 @@ unset GITHUB_TOKEN
 curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash -s -- --web
 ```
 
+`get.sh` erkennt eine vorhandene Installation selbst (gesucht wird in `/opt/mailserver`, `/srv/mailserver`, `/root/mailserver`, `/home/*/mailserver`, `/home/*` und im aktuellen Ordner; `accounts.conf` und `data/` bleiben erhalten). Findet es mehrere, bricht es ab und nennt sie; dann den Ordner mit `sudo env MAILSERVER_DIR=/home/roland/mailserver bash` angeben. Ohne vorhandene Installation wird `/opt/mailserver` angelegt.
+
 Im Terminal erscheinen eine Adresse (`http://<server-ip>:8099`) und ein Einmal-Passwort. Im Browser trägst du die Konten ein
 (Anbieter wird an der Adresse erkannt, auch gmx.at), prüfst die Zugangsdaten und startest die Installation. Das Protokoll läuft live mit.
 Die Seite ist **nicht verschlüsselt** (HTTP): nur im Heimnetz oder über Tailscale benutzen. Sicherer ist ein SSH-Tunnel: Starte mit

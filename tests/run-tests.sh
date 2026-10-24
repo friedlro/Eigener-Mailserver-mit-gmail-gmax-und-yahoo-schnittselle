@@ -523,6 +523,25 @@ else
   skip "rsync fehlt: Wiederherstellungs-Tests"
 fi
 
+# ---------------------------------------------------------------- 7c. get.sh erkennt vorhandene Installationen
+title "7c. get.sh: vorhandene Installation erkennen"
+G="$W/getsh"; mkdir -p "$G/opt/mailserver" "$G/home/roland/mailserver" "$G/home/anna" "$G/leer"
+touch "$G/home/roland/mailserver/setup-mailserver.sh" "$G/home/roland/mailserver/accounts.conf"
+detect() { ( cd "$G/leer" && env GET_SH_DETECT_ONLY=1 MAILSERVER_SEARCH="$G/opt/mailserver $G/home/*/mailserver $G/home/*" "$@" bash "$ROOT/get.sh" 2>&1 ); }
+OUT="$(detect)"
+check "get.sh findet die vorhandene Installation unter home/roland/mailserver" bash -c "[[ \"$OUT\" == *'Vorhandene Installation gefunden: $G/home/roland/mailserver'* ]] && [[ \"\$(tail -n1 <<<\"$OUT\")\" == '$G/home/roland/mailserver' ]]"
+check "get.sh: MAILSERVER_DIR hat Vorrang" test "$(detect MAILSERVER_DIR=/srv/anderswo | tail -n1)" = "/srv/anderswo"
+touch "$G/opt/mailserver/setup-mailserver.sh" "$G/opt/mailserver/docker-compose.yml"
+OUT="$(detect || true)"
+check "get.sh: mehrere Installationen werden gemeldet, nichts wird geraten" bash -c "[[ \"$OUT\" == *'Mehrere vorhandene Installationen'* && \"$OUT\" == *'$G/opt/mailserver'* && \"$OUT\" == *'$G/home/roland/mailserver'* ]]"
+rm -rf "$G/opt/mailserver" "$G/home/roland"
+check "get.sh: ohne vorhandene Installation gilt /opt/mailserver" test "$(detect | tail -n1)" = "/opt/mailserver"
+mkdir -p "$G/home/anna/mail2"; touch "$G/home/anna/setup-mailserver.sh"   # Skript ohne accounts.conf/docker-compose.yml zählt nicht
+check "get.sh: Ordner ohne Konfiguration zählt nicht als Installation" test "$(detect | tail -n1)" = "/opt/mailserver"
+touch "$G/home/anna/accounts.conf"
+check "get.sh: Installation direkt in /home/<benutzer> wird erkannt" test "$(detect | tail -n1)" = "$G/home/anna"
+check "get.sh: Syntax" bash -n "$ROOT/get.sh"
+
 # ---------------------------------------------------------------- 8. Deinstallation
 title "8. uninstall.sh -y (ohne Mail-Daten)"
 D="$(new_instance uninstall)"

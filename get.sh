@@ -6,7 +6,9 @@
 #   ... | sudo bash -s -- --web     Installation im Browser statt im Terminalmenü (Adresse und Passwort erscheinen im Terminal)
 #
 # Einstellungen (Umgebungsvariablen, bei sudo mit "sudo env VAR=... bash"):
-#   MAILSERVER_DIR    Zielordner (Standard /opt/mailserver; vorhandene accounts.conf und data/ bleiben erhalten)
+#   MAILSERVER_DIR    Zielordner. Ohne Angabe wird eine vorhandene Installation gesucht (/opt/mailserver, /srv/mailserver,
+#                     /root/mailserver, /home/*/mailserver, /home/*, aktueller Ordner); gibt es keine, wird /opt/mailserver
+#                     angelegt. Vorhandene accounts.conf und data/ bleiben erhalten.
 #   MAILSERVER_REF    Branch, Tag oder Commit (Standard main)
 #   GITHUB_TOKEN      nur für ein privates Repository (Token mit Leserecht auf "Contents")
 
@@ -14,7 +16,39 @@ set -euo pipefail
 
 REPO="friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle"
 REF="${MAILSERVER_REF:-main}"
-DEST="${MAILSERVER_DIR:-/opt/mailserver}"
+
+# Eine vorhandene Installation erkennen: Ordner mit setup-mailserver.sh und accounts.conf oder docker-compose.yml
+find_install() {
+  local pat c r seen=" "
+  FOUND=()
+  shopt -s nullglob
+  # shellcheck disable=SC2206
+  local pats=(${MAILSERVER_SEARCH:-/opt/mailserver /srv/mailserver /root/mailserver /home/*/mailserver /home/* "$PWD"})
+  for pat in "${pats[@]}"; do
+    for c in $pat; do
+      [[ -d "$c" && -f "$c/setup-mailserver.sh" && ( -f "$c/accounts.conf" || -f "$c/docker-compose.yml" ) ]] || continue
+      r="$(readlink -f "$c")"
+      [[ "$seen" == *" $r "* ]] && continue
+      seen+="$r "; FOUND+=("$r")
+    done
+  done
+  shopt -u nullglob
+}
+
+if [[ -n "${MAILSERVER_DIR:-}" ]]; then
+  DEST="$MAILSERVER_DIR"
+else
+  find_install
+  case ${#FOUND[@]} in
+    0) DEST="/opt/mailserver" ;;
+    1) DEST="${FOUND[0]}"; echo "Vorhandene Installation gefunden: $DEST (anderer Ordner: MAILSERVER_DIR=... angeben)" ;;
+    *) echo "Fehler: Mehrere vorhandene Installationen gefunden:" >&2
+       printf '  %s\n' "${FOUND[@]}" >&2
+       echo "Bitte den gewünschten Ordner angeben, z. B.:  ... | sudo env MAILSERVER_DIR=${FOUND[0]} bash" >&2
+       exit 1 ;;
+  esac
+fi
+[[ "${GET_SH_DETECT_ONLY:-0}" != "1" ]] || { echo "$DEST"; exit 0; }   # nur für Tests
 
 [[ $EUID -eq 0 ]] || { echo "Bitte mit sudo starten (siehe Kopf von get.sh)." >&2; exit 1; }
 for t in curl tar; do
