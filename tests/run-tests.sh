@@ -402,6 +402,24 @@ HASH1="$(sha256sum "$D/data/certs/cert.pem" | cut -d' ' -f1)"
 run "$D" bash setup-mailserver.sh -y
 check "Passendes Zertifikat bleibt bei jedem Lauf unverändert" bash -c "[[ \"\$(sha256sum '$D/data/certs/cert.pem' | cut -d' ' -f1)\" == '$HASH1' ]] && [[ \$(ls -d '$D'/data/certs-alt/* | wc -l) -eq 1 ]]"
 
+# ---------------------------------------------------------------- 5g. Schutz vor geänderter DOMAIN
+title "5g. Postfächer, die zu keinem Konto gehören (z. B. nach Änderung von DOMAIN), stoppen die Installation"
+D="$(new_instance orphan)"
+printf '%s\n' 'DOMAIN=neu.example.at' 'anna@gmail.com|abcdabcdabcdabcd|anna' > "$D/accounts.conf"
+mkdir -p "$D/data/mail-data/alt.example.at/anna/cur" "$D/data/mail-data/alt.example.at/leer/cur"
+for i in 1 2 3; do echo "mail $i" > "$D/data/mail-data/alt.example.at/anna/cur/$i"; done
+run "$D" bash setup-mailserver.sh -y
+check "Geänderte DOMAIN: Abbruch mit Hinweis und Zahl der Mails" bash -c "[[ $RC -ne 0 ]] && grep -q '3 Mails: data/mail-data/alt.example.at/anna' '$D/out' && grep -q 'NICHT gelöscht' '$D/out'"
+check "Geänderte DOMAIN: leere Postfächer werden nicht gemeldet" bash -c "! grep -q 'alt.example.at/leer' '$D/out'"
+check "Geänderte DOMAIN: nichts wurde geschrieben, die Mails sind unverändert" bash -c "[[ ! -f '$D/docker-compose.yml' ]] && [[ \$(find '$D/data/mail-data' -type f | wc -l) -eq 3 ]]"
+run "$D" env ALLOW_ORPHAN_MAILBOXES=1 bash setup-mailserver.sh -y
+check "Mit ALLOW_ORPHAN_MAILBOXES=1 läuft die Installation bewusst weiter" bash -c "[[ $RC -eq 0 ]] && [[ -f '$D/docker-compose.yml' ]]"
+D="$(new_instance orphan2)"
+printf '%s\n' 'DOMAIN=neu.example.at' 'anna@gmail.com|abcdabcdabcdabcd|anna@alt.example.at' > "$D/accounts.conf"
+mkdir -p "$D/data/mail-data/alt.example.at/anna/cur"; echo "mail" > "$D/data/mail-data/alt.example.at/anna/cur/1"
+run "$D" bash setup-mailserver.sh -y
+check "Alte Adresse als lokaler Name angegeben: Mails gehören zum Konto, kein Abbruch" test "$RC" -eq 0
+
 # ---------------------------------------------------------------- 6. Installationsassistent
 title "6. install.sh (Menüoberfläche) und Zusammenspiel mit setup-mailserver.sh"
 D="$(new_instance wizard)"

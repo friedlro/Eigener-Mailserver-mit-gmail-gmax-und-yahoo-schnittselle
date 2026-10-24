@@ -319,6 +319,33 @@ if [[ "$MODE" == "cleanup" || "$MODE" == "empty-trash" ]]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------- Schutz vor einer geänderten DOMAIN
+# Die lokale Adresse eines Kontos ist name@DOMAIN, und die Mails liegen unter data/mail-data/<domain>/<name>/. Wird DOMAIN geändert,
+# findet der Mailserver die vorhandenen Mails nicht mehr: sie wären nicht gelöscht, aber unter einer neuen Adresse nicht erreichbar.
+# Deshalb: gibt es Postfächer mit Mails, die zu keinem konfigurierten Konto gehören, wird abgebrochen.
+if [[ "$MODE" == "install" || "$MODE" == "update" ]] && [[ -d data/mail-data && "${ALLOW_ORPHAN_MAILBOXES:-0}" != "1" ]]; then
+  declare -A KNOWN=(); for a in "${L_ADDR[@]}"; do KNOWN["${a,,}"]=1; done
+  ORPH=()
+  for mb in data/mail-data/*/*; do
+    [[ -d "$mb" ]] || continue
+    rel="${mb#data/mail-data/}"; addr="${rel#*/}@${rel%%/*}"
+    [[ -z "${KNOWN[${addr,,}]:-}" ]] || continue
+    n="$(find "$mb" -type f \( -path '*/cur/*' -o -path '*/new/*' \) 2>/dev/null | wc -l)"
+    (( n > 0 )) && ORPH+=("$n Mails: $mb  (Adresse $addr)")
+  done
+  if (( ${#ORPH[@]} )); then
+    {
+      echo "Abbruch: Es gibt Postfächer mit Mails, die zu keinem Konto in accounts.conf gehören:"
+      printf '  %s\n' "${ORPH[@]}"
+      echo "Wahrscheinlich wurde DOMAIN (oder der lokale Name eines Kontos) geändert. Die Mails sind NICHT gelöscht, wären aber unter den"
+      echo "neuen Adressen nicht zu finden. Stelle den früheren Wert in accounts.conf wieder her (Sicherungen: accounts.conf.bak-*,"
+      echo "config-backup/) oder gib das Konto mit der vollständigen alten Adresse als lokalen Namen an (dritte Spalte, z. B. anna@alte-domain.at)."
+      echo "Bewusst trotzdem fortfahren (z. B. nach dem Löschen eines Kontos): ALLOW_ORPHAN_MAILBOXES=1 setzen."
+    } >&2
+    exit 1
+  fi
+fi
+
 # ---------------------------------------------------------------- Rückfrage
 PROV_LIST="$(printf '%s\n' "${G_PROV[@]}" | sort -u | tr '\n' ' ')"
 if ((! ASSUME_YES)); then
