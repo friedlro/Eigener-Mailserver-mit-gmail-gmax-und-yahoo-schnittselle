@@ -27,6 +27,7 @@ sondern auf einem Entwicklungsrechner oder in einer Test-VM.
 | USB-Backup | nur USB-Datenträger (nie System-/interne Platte, nie ein Stick mit laufendem System), ungültige Namen, NTFS nur nach `--format`, fstab (UUID, nofail), Aushängen, Cron mit `REQUIRE_MOUNT`, `--remove` (`tests/fixtures/lsblk.json`, Platzhalter für mount/mkfs/blkid) |
 | Tailscale und MCP | Anmeldelink wird ausgegeben und in der Oberfläche erkannt, bereits angemeldet, SSH nachträglich, Reihenfolge Tailscale → Installation → MCP → Backup, Benutzerprüfung (kein root, muss existieren), nicht beim Zugangsdaten-Test (Platzhalter für `tailscale`) |
 | Umstellung Cloudflare → Tailscale | Probelauf, Abbruch ohne Änderung wenn Tailscale fehlschlägt, Mails und Domain unverändert, Cloudflare-Einträge/Container/Token/Cron entfernt, Webmail nur lokal und per `tailscale serve`, Sicherungen, zweiter Aufruf |
+| Geänderte DOMAIN | Postfächer mit Mails ohne Konto stoppen Installation und `--update` (nichts wird geschrieben), leere Postfächer nicht, `ALLOW_ORPHAN_MAILBOXES=1`, alte Adresse als lokaler Name |
 | Zertifikat | ein selbst signiertes Zertifikat mit falschem Namen wird gesichert und erneuert, ein passendes bleibt unverändert |
 | get.sh | Erkennung einer vorhandenen Installation (eine, mehrere, keine, nur Skript ohne Konfiguration), `MAILSERVER_DIR` hat Vorrang |
 | Wiederherstellung der Konfiguration | `--list-config`, Probelauf, ohne Terminal, neueste/bestimmte Sicherung, Sicherung vor der Wiederherstellung (eindeutig), Rückgängig, ungültige Namen |
