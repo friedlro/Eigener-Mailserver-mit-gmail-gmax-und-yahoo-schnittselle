@@ -76,3 +76,33 @@ Nach der Installation erscheint ein Anmelde-Link, den Sie in einem Browser best�
 - Teste Zugriff von außen nicht aus dem eigenen WLAN, sondern mit mobilen Daten (NAT-Loopback).
 - Vergib dem Server im Router eine **feste lokale IP**.
 - Im Heimnetz muss der Servername auf die lokale IP des Servers zeigen (DNS-Eintrag im Router oder Pi-hole).
+
+## Von Cloudflare auf Tailscale umstellen (ohne Mailverlust)
+
+`migrate-to-tailscale.sh` ersetzt Domain, Let's Encrypt, DDNS und Cloudflare Tunnel durch Tailscale. **Die Mails werden dabei nie angefasst**
+(`data/mail-data` bleibt unverändert), und die Mail-Domain bleibt erhalten.
+
+```bash
+cd /home/roland/mailserver            # dein Ordner
+sudo ./migrate-to-tailscale.sh --dry-run   # ansehen, was sich ändern würde (ändert nichts)
+sudo ./migrate-to-tailscale.sh             # umstellen (zur Bestätigung UMSTELLEN eintippen)
+```
+
+**Warum `DOMAIN` bleibt:** Die lokalen Adressen (`anna@deinedomain.at`) und die Postfach-Ordner (`data/mail-data/deinedomain.at/anna/`) hängen an der
+Domain. Würde man sie löschen, wären die Konten plötzlich `anna@home.lan`, und die vorhandenen Mails wären unter dem neuen Namen nicht mehr
+zu finden. Entfernt werden nur `CF_API_TOKEN`, `LE_EMAIL`, `CF_TUNNEL_TOKEN` und `DDNS`.
+
+**Ablauf:**
+1. Mails zählen, Konfiguration sichern (`accounts.conf.bak-<Zeit>`, `config-backup/vor-tailscale-<Zeit>`) und, wenn eingerichtet, einmal `backup-mail.sh`
+   ausführen (schlägt das Backup fehl, wird nichts umgestellt).
+2. **Tailscale zuerst** einrichten (Anmeldelink im Terminal bestätigen). Klappt das nicht, bleibt alles unverändert und Cloudflare läuft weiter.
+3. Webmail per `tailscale serve` im Tailnet über HTTPS freigeben (`https://<name>.ts.net`); es lauscht danach nur noch auf `127.0.0.1`.
+4. Cloudflare-Einträge aus `accounts.conf` entfernen, `setup-mailserver.sh --update` ausführen: neue Konfiguration, selbst signiertes Zertifikat
+   für `mail.<Domain>`, die Container `cloudflared` und `ddns` sowie die Token-Datei und der Zertifikats-Cron werden entfernt.
+5. Kontrolle: Mails vorher/nachher, Container laufen.
+
+**Danach:** Mailclients verbinden sich mit dem Tailscale-Namen oder der Tailscale-Adresse des Servers (Port 993/587); das Gerät muss im selben
+Tailnet sein. Das Zertifikat ist selbst signiert, die Mail-App fragt einmal nach einer Ausnahme. Das Senden über GMX, Yahoo und Gmail ändert sich nicht.
+Noch von Hand bei Cloudflare: DNS-Einträge und Tunnel löschen, API-Token widerrufen; im Router die Portfreigaben für 993 und 587 entfernen.
+
+**Rückgängig:** `sudo ./restore-mail.sh --config vor-tailscale-<Zeit>` und `sudo cp -p accounts.conf.bak-<Zeit> accounts.conf`, dann `sudo ./setup-mailserver.sh --update`.

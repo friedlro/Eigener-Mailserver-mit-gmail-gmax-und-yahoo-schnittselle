@@ -47,7 +47,7 @@ for n in chown chgrp apt-get systemctl; do ln -sf "$STUBS/noop" "$W/bin/$n"; don
 new_instance() {
   local d="$W/$1"; mkdir -p "$d/mcp" "$d/cron" "$d/logrotate" "$d/sudoers" "$d/log"
   local f
-  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh tailscale-setup.sh restore-mail.sh; do
+  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh tailscale-setup.sh restore-mail.sh migrate-to-tailscale.sh; do
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
   done
   cp "$ROOT/mcp/install.sh" "$d/mcp/"
@@ -349,6 +349,46 @@ tsrun --timeout abc
 check "Tailscale: ungültige Wartezeit wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Zahl' '$D/out'"
 check "tailscale-setup.sh und mcp/install.sh: Syntax" bash -c "bash -n '$ROOT/tailscale-setup.sh' && bash -n '$ROOT/mcp/install.sh'"
 
+# ---------------------------------------------------------------- 5e. Umstellung Cloudflare -> Tailscale
+title "5e. migrate-to-tailscale.sh (Cloudflare -> Tailscale ohne Mailverlust)"
+D="$(new_instance mig)"; echo out > "$D/ts-state"
+cat > "$D/accounts.conf" <<'EOF'
+DOMAIN=example.at
+CF_API_TOKEN=AAAAAAAAAAAAAAAAAAAAAAAA
+LE_EMAIL=me@example.at
+CF_TUNNEL_TOKEN=BBBBBBBBBBBBBBBBBBBBBBBB
+DDNS=1
+WEBMAIL_BIND=0.0.0.0
+anna@gmail.com|abcdabcdabcdabcd|anna
+EOF
+run "$D" bash setup-mailserver.sh -y
+check "Ausgangslage: Cloudflare-Tunnel und DDNS stehen in der Compose-Datei" bash -c "grep -q 'cloudflared:' '$D/docker-compose.yml' && grep -q 'ddns:' '$D/docker-compose.yml' && [[ -f '$D/data/cloudflare.ini' && -f '$D/cron/mailserver-certbot' ]]"
+mkdir -p "$D/data/mail-data/example.at/anna/cur"; for i in 1 2 3; do echo "mail $i" > "$D/data/mail-data/example.at/anna/cur/$i"; done
+mig() { run "$D" env STUB_TS_STATE="$D/ts-state" bash migrate-to-tailscale.sh "${MIGARGS[@]}"; }
+MIGARGS=(--dry-run); mig
+check "Umstellung, Probelauf: nichts wird verändert" bash -c "[[ $RC -eq 0 ]] && grep -q 'Probelauf beendet' '$D/out' && grep -q '^CF_API_TOKEN=' '$D/accounts.conf' && ! ls '$D'/config-backup/vor-tailscale-* >/dev/null 2>&1 && ! grep -q 'tailscale up' '$D/stub.ts' 2>/dev/null"
+check "Umstellung, Probelauf: nennt die Mail-Domain als unverändert und zählt die Mails" bash -c "grep -q 'example.at.*unverändert' '$D/out' && grep -q 'Mails (Dateien):   3' '$D/out'"
+MIGARGS=(-y --no-backup); run "$D" env STUB_TS_STATE="$D/ts-state" STUB_TS_FAIL=1 bash migrate-to-tailscale.sh "${MIGARGS[@]}"
+check "Tailscale schlägt fehl: Abbruch, Cloudflare und Konfiguration bleiben unverändert" bash -c "[[ $RC -ne 0 ]] && grep -q 'NICHTS' '$D/out' && grep -q '^CF_API_TOKEN=' '$D/accounts.conf' && grep -q 'cloudflared:' '$D/docker-compose.yml'"
+run "$D" env STUB_TS_STATE="$D/ts-state" bash -c "bash migrate-to-tailscale.sh --no-backup </dev/null"
+check "Umstellung ohne Terminal und ohne -y wird nicht ungefragt ausgeführt" bash -c "[[ $RC -ne 0 ]] && grep -q '^CF_API_TOKEN=' '$D/accounts.conf'"
+mig
+check "Umstellung: Exit-Code 0" test "$RC" -eq 0
+check "Umstellung: Mails sind unverändert (Anzahl und Inhalt)" bash -c "[[ \$(find '$D/data/mail-data' -type f | wc -l) -eq 3 ]] && [[ \"\$(cat '$D/data/mail-data/example.at/anna/cur/2')\" == 'mail 2' ]] && grep -q 'Mails vorher: 3   nachher: 3' '$D/out'"
+check "Umstellung: DOMAIN bleibt (damit bleiben Adressen und Postfach-Ordner)" has "$D/accounts.conf" "DOMAIN=example.at"
+check "Umstellung: Cloudflare-Einträge sind aus accounts.conf entfernt" bash -c "! grep -qE '^(CF_API_TOKEN|LE_EMAIL|CF_TUNNEL_TOKEN|DDNS)=' '$D/accounts.conf'"
+check "Umstellung: Webmail lauscht nur lokal" has "$D/accounts.conf" "WEBMAIL_BIND=127.0.0.1"
+check "Umstellung: Tunnel und DDNS sind aus der Compose-Datei, Token nicht mehr in .env" bash -c "! grep -qE 'cloudflared:|ddns:' '$D/docker-compose.yml' && ! grep -q 'CF_' '$D/.env' && ! grep -qE 'AAAAAAAA|BBBBBBBB' '$D/docker-compose.yml' '$D/.env'"
+check "Umstellung: Token-Datei und Zertifikats-Cron sind gelöscht" bash -c "[[ ! -e '$D/data/cloudflare.ini' && ! -e '$D/cron/mailserver-certbot' ]]"
+check "Umstellung: veraltete Cloudflare-Container werden entfernt (--remove-orphans)" has "$D/stub.args" "docker compose up -d --remove-orphans"
+check "Umstellung: Tailscale mit SSH angemeldet und Webmail im Tailnet freigegeben" bash -c "grep -q 'tailscale up .*--ssh' '$D/stub.ts' && grep -q 'tailscale serve --bg --https=443 http://127.0.0.1:8080' '$D/stub.ts'"
+check "Umstellung: alte accounts.conf liegt gesichert (600) mit den Cloudflare-Einträgen" bash -c "f=\$(ls '$D'/accounts.conf.bak-* | head -n1); [[ \$(stat -c %a \"\$f\") == 600 ]] && grep -q '^CF_API_TOKEN=' \"\$f\""
+check "Umstellung: alte Konfiguration liegt in config-backup/vor-tailscale-*" bash -c "grep -q 'cloudflared:' '$D'/config-backup/vor-tailscale-*/docker-compose.yml"
+check "Umstellung: selbst signiertes Zertifikat für mail.<Domain> ist da" test -f "$D/data/certs/cert.pem"
+MIGARGS=(-y --no-backup --dry-run); mig
+check "Zweiter Aufruf: erkennt, dass Cloudflare schon weg ist" has "$D/out" "keine Einträge mehr in accounts.conf"
+check "migrate-to-tailscale.sh: Syntax" bash -n "$ROOT/migrate-to-tailscale.sh"
+
 # ---------------------------------------------------------------- 6. Installationsassistent
 title "6. install.sh (Menüoberfläche) und Zusammenspiel mit setup-mailserver.sh"
 D="$(new_instance wizard)"
@@ -522,6 +562,25 @@ if command -v rsync >/dev/null; then
 else
   skip "rsync fehlt: Wiederherstellungs-Tests"
 fi
+
+# ---------------------------------------------------------------- 7c. get.sh erkennt vorhandene Installationen
+title "7c. get.sh: vorhandene Installation erkennen"
+G="$W/getsh"; mkdir -p "$G/opt/mailserver" "$G/home/roland/mailserver" "$G/home/anna" "$G/leer"
+touch "$G/home/roland/mailserver/setup-mailserver.sh" "$G/home/roland/mailserver/accounts.conf"
+detect() { ( cd "$G/leer" && env GET_SH_DETECT_ONLY=1 MAILSERVER_SEARCH="$G/opt/mailserver $G/home/*/mailserver $G/home/*" "$@" bash "$ROOT/get.sh" 2>&1 ); }
+OUT="$(detect)"
+check "get.sh findet die vorhandene Installation unter home/roland/mailserver" bash -c "[[ \"$OUT\" == *'Vorhandene Installation gefunden: $G/home/roland/mailserver'* ]] && [[ \"\$(tail -n1 <<<\"$OUT\")\" == '$G/home/roland/mailserver' ]]"
+check "get.sh: MAILSERVER_DIR hat Vorrang" test "$(detect MAILSERVER_DIR=/srv/anderswo | tail -n1)" = "/srv/anderswo"
+touch "$G/opt/mailserver/setup-mailserver.sh" "$G/opt/mailserver/docker-compose.yml"
+OUT="$(detect || true)"
+check "get.sh: mehrere Installationen werden gemeldet, nichts wird geraten" bash -c "[[ \"$OUT\" == *'Mehrere vorhandene Installationen'* && \"$OUT\" == *'$G/opt/mailserver'* && \"$OUT\" == *'$G/home/roland/mailserver'* ]]"
+rm -rf "$G/opt/mailserver" "$G/home/roland"
+check "get.sh: ohne vorhandene Installation gilt /opt/mailserver" test "$(detect | tail -n1)" = "/opt/mailserver"
+mkdir -p "$G/home/anna/mail2"; touch "$G/home/anna/setup-mailserver.sh"   # Skript ohne accounts.conf/docker-compose.yml zählt nicht
+check "get.sh: Ordner ohne Konfiguration zählt nicht als Installation" test "$(detect | tail -n1)" = "/opt/mailserver"
+touch "$G/home/anna/accounts.conf"
+check "get.sh: Installation direkt in /home/<benutzer> wird erkannt" test "$(detect | tail -n1)" = "$G/home/anna"
+check "get.sh: Syntax" bash -n "$ROOT/get.sh"
 
 # ---------------------------------------------------------------- 8. Deinstallation
 title "8. uninstall.sh -y (ohne Mail-Daten)"

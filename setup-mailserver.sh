@@ -396,6 +396,8 @@ EOF
   SSL_ENV="      - SSL_TYPE=letsencrypt"
   SSL_VOL="      - ./data/certbot:/etc/letsencrypt:ro"
 else
+  # Wurde Cloudflare/Let's Encrypt abgeschaltet (z. B. Umstellung auf Tailscale): Token und Erneuerungs-Job entfernen
+  rm -f data/cloudflare.ini "$CRON_DIR/mailserver-certbot"
   say "Self-signed Zertifikat erzeugen"
   if [[ ! -f data/certs/cert.pem ]]; then
     openssl req -x509 -nodes -newkey rsa:4096 -days 3650 \
@@ -595,7 +597,7 @@ else
   write_env 0
 fi
 docker compose pull -q
-docker compose up -d
+docker compose up -d --remove-orphans
 
 wait_dovecot() {
   local _
@@ -698,7 +700,7 @@ EOF
 done
 chmod 600 data/config/fetchmail.cf
 write_env 1
-docker compose up -d
+docker compose up -d --remove-orphans
 # Bei --update bleibt der Container ohne Änderung an der Compose-Datei stehen: neu starten, damit Relay- und Absender-Einstellungen gelten
 [[ "$MODE" != "update" ]] || docker compose restart mailserver
 wait_dovecot

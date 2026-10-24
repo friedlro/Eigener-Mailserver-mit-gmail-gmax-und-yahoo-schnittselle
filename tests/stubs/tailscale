@@ -8,6 +8,7 @@ case "${1:-}" in
     [[ "$state" == "in" ]] || { echo "Logged out." >&2; exit 1; }
     if [[ "${2:-}" == "--json" ]]; then echo '{"Self":{"DNSName":"testserver.tail1234.ts.net."}}'; else echo "100.64.1.2 testserver"; fi ;;
   up)
+    [[ "${STUB_TS_FAIL:-0}" != "1" ]] || exit 1
     if [[ "$state" != "in" ]]; then
       printf '\nTo authenticate, visit:\n\n\thttps://login.tailscale.com/a/abc123XYZ\n\n' >&2
       echo in > "$STUB_TS_STATE"
