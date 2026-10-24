@@ -303,6 +303,7 @@ sudo ./backup-mail.sh --install /mnt/backup/mail   # tägliches Backup 03:30 Uhr
 sudo ./usb-backup.sh --setup /dev/sdb1     # oder: USB-Stick als Backup-Ziel einrichten (auch in der Web-Oberfläche), siehe docs/BETRIEB.md
 sudo ./restore-mail.sh --list              # Backup wiederherstellen: Snapshots anzeigen; --mailbox ADRESSE oder --all, siehe docs/BETRIEB.md
 sudo ./restore-mail.sh --config            # nur die Konfiguration aus config-backup/ wiederherstellen (--list-config, --dry-run)
+sudo ./migrate-to-tailscale.sh --dry-run   # von Cloudflare auf Tailscale umstellen, ohne Mailverlust (docs/ZUGRIFF.md)
 sudo ./setup-mailserver.sh --update       # nach einer neuen Projektversion
 ```
 
