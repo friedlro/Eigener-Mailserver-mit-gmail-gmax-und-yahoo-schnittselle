@@ -109,6 +109,22 @@ neu auf (`doveadm force-resync`). **Der jetzige Stand wird vorher gesichert** in
 bei `--all` auch die alte `accounts.conf`); nach der Kontrolle löschen. Das Backup selbst wird nie verändert. Mails, die nur im jetzigen Stand
 liegen, werden beim Wiederherstellen entfernt, bleiben aber in dieser Sicherung erhalten.
 
+**Nur die Konfiguration** (nicht die Mails) kommt aus `config-backup/`. Die legt `setup-mailserver.sh` bei jeder Aktualisierung (`--update`)
+automatisch an: `docker-compose.yml`, `.env`, `data/config` (Konten, Relay, fetchmail, Zertifikate ...) und die Roundcube-Konfiguration.
+
+```bash
+sudo ./restore-mail.sh --list-config                       # Sicherungen anzeigen
+sudo ./restore-mail.sh --config --dry-run                  # ansehen, was sich ändern würde (ändert nichts)
+sudo ./restore-mail.sh --config                            # neueste Sicherung wiederherstellen
+sudo ./restore-mail.sh --config 20261009_210934            # eine bestimmte
+sudo ./restore-mail.sh --config vor-restore-20261024-153000   # die letzte Wiederherstellung rückgängig machen
+```
+
+Vorher wird der jetzige Stand in `config-backup/vor-restore-<Zeit>/` gesichert, damit sich jede Wiederherstellung rückgängig machen lässt. Danach
+werden die Container neu gestartet. **Achtung:** Konten, die nach der Sicherung angelegt wurden, fehlen dann in `data/config/postfix-accounts.cf`
+(ihre Mails bleiben unter `data/mail-data` erhalten); neu anlegen mit `./setup-mailserver.sh --update`. Ein einzelnes Backup der
+`accounts.conf` (`accounts.conf.bak-*`) kopierst du von Hand zurück: `sudo cp -p accounts.conf.bak-<Zeit> accounts.conf`.
+
 **Frischer Server (alles ist weg):** Dateien neu laden (`get.sh`), den Backup-Stick einhängen (`sudo ./usb-backup.sh --setup /dev/sdb1`, das Dateisystem
 bleibt erhalten), dann `sudo ./restore-mail.sh --all` und `sudo ./setup-mailserver.sh --update`.
 

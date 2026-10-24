@@ -5,6 +5,11 @@
 #   sudo ./restore-mail.sh --list [ZIEL]                          Snapshots anzeigen
 #   sudo ./restore-mail.sh --mailbox anna@home.lan [OPTIONEN]     ein Postfach wiederherstellen
 #   sudo ./restore-mail.sh --all [OPTIONEN]                       alles: Mails, Konfiguration, Webmail-Daten, accounts.conf, .env
+#   sudo ./restore-mail.sh --list-config                          Konfigurationssicherungen (config-backup/) anzeigen
+#   sudo ./restore-mail.sh --config [NAME]                        Konfiguration aus config-backup/ wiederherstellen (Standard: neueste)
+#
+# Die Konfigurationssicherung legt setup-mailserver.sh bei jeder Aktualisierung (--update) an: docker-compose.yml, .env, data/config
+# (Postfach-Konten, Relay, fetchmail, Zertifikate ...) und die Roundcube-Konfiguration. Mails sind darin nicht enthalten.
 #
 # Optionen:
 #   --from ZIEL        Backup-Ordner (Standard: aus dem Cron-Job, sonst /mnt/mail-backup)
@@ -27,12 +32,14 @@ CRON_DIR="${CRON_DIR:-/etc/cron.d}"
 die()  { echo "Fehler: $*" >&2; exit 1; }
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
-MODE=""; MAILBOX=""; FROM=""; SNAP="latest"; DRY=0; YES=0
+MODE=""; MAILBOX=""; FROM=""; SNAP="latest"; DRY=0; YES=0; CFGSNAP="latest"
 while (( $# )); do
   case "$1" in
     --list) MODE="list" ;;
     --mailbox) MODE="mailbox"; MAILBOX="${2:-}"; shift ;;
     --all) MODE="all" ;;
+    --list-config) MODE="listconfig" ;;
+    --config) MODE="config"; if [[ -n "${2:-}" && "${2:-}" != -* ]]; then CFGSNAP="$2"; shift; fi ;;
     --from) FROM="${2:-}"; shift ;;
     --snapshot) SNAP="${2:-}"; shift ;;
     --dry-run) DRY=1 ;;
@@ -43,7 +50,84 @@ while (( $# )); do
   esac
   shift
 done
-[[ -n "$MODE" ]] || die "Aktion fehlt (--list, --mailbox ADRESSE oder --all). Siehe --help."
+[[ -n "$MODE" ]] || die "Aktion fehlt (--list, --mailbox ADRESSE, --all oder --config). Siehe --help."
+
+# ---------------------------------------------------------------- Konfigurationssicherung (config-backup/)
+CFG_RE='^([0-9]{8}_[0-9]{6}|vor-restore-[0-9]{8}-[0-9]{6}(-[0-9]+)?)$'
+if [[ "$MODE" == "listconfig" || "$MODE" == "config" ]]; then
+  CBDIR="$BASE/config-backup"
+  [[ -d "$CBDIR" ]] || die "Es gibt keine Konfigurationssicherung (config-backup/ fehlt). Sie entsteht bei jedem ./setup-mailserver.sh --update."
+  mapfile -t ALLCFG < <(find "$CBDIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+  CFGS=(); for n in "${ALLCFG[@]}"; do [[ "$n" =~ $CFG_RE ]] && CFGS+=("$n"); done
+  if [[ "$MODE" == "listconfig" ]]; then
+    say "Konfigurationssicherungen in $CBDIR"
+    (( ${#CFGS[@]} )) || { echo "  (keine gefunden)"; exit 0; }
+    for n in "${CFGS[@]}"; do
+      inh=""
+      [[ -f "$CBDIR/$n/docker-compose.yml" ]] && inh+=" docker-compose.yml"
+      [[ -f "$CBDIR/$n/.env" ]] && inh+=" .env"
+      [[ -d "$CBDIR/$n/config" ]] && inh+=" config"
+      [[ -d "$CBDIR/$n/roundcube-config" ]] && inh+=" roundcube-config"
+      printf '  %-28s [%s ]\n' "$n" "$inh"
+    done
+    exit 0
+  fi
+  if [[ "$CFGSNAP" == "latest" ]]; then   # die neueste reguläre Sicherung (nicht die Sicherungen vor einer Wiederherstellung)
+    CFGSNAP=""
+    for n in "${CFGS[@]}"; do [[ "$n" == vor-restore-* ]] || CFGSNAP="$n"; done
+    [[ -n "$CFGSNAP" ]] || die "Keine Konfigurationssicherung gefunden (siehe --list-config)."
+  fi
+  [[ "$CFGSNAP" =~ $CFG_RE ]] || die "Ungültiger Name: $CFGSNAP (Beispiel: 20261009_210934, siehe --list-config)."
+  CS="$CBDIR/$CFGSNAP"
+  [[ -d "$CS" ]] || die "Konfigurationssicherung nicht gefunden: $CFGSNAP (siehe --list-config)."
+  [[ -f "$CS/docker-compose.yml" || -d "$CS/config" ]] || die "Die Sicherung $CFGSNAP enthält keine Konfiguration."
+  command -v rsync >/dev/null || { apt-get update -qq && apt-get install -y -qq rsync; }
+  SAFE="$CBDIR/vor-restore-$(date +%Y%m%d-%H%M%S)"; n=0
+  while [[ -e "$SAFE" ]]; do n=$(( n + 1 )); SAFE="$CBDIR/vor-restore-$(date +%Y%m%d-%H%M%S)-$n"; done
+  echo "Sicherung: $CS"
+  echo "Ziel:      $BASE (docker-compose.yml, .env, data/config, data/roundcube/config)"
+  echo "Der jetzige Stand wird vorher gesichert in: $SAFE"
+  if (( DRY )); then
+    say "Probelauf: so würde sich die Konfiguration ändern (es wird nichts verändert)"
+    for f in docker-compose.yml .env; do
+      [[ -f "$CS/$f" ]] || continue
+      if cmp -s "$CS/$f" "$BASE/$f"; then echo "  $f: unverändert"; else echo "  $f: wird ersetzt"; fi
+    done
+    [[ ! -d "$CS/config" ]] || rsync -a --dry-run --delete -i "$CS/config/" "$BASE/data/config/" | head -n 100
+    [[ ! -d "$CS/roundcube-config" ]] || rsync -a --dry-run --delete -i "$CS/roundcube-config/" "$BASE/data/roundcube/config/" | head -n 100
+    exit 0
+  fi
+  if (( ! YES )); then
+    [[ -t 0 ]] || die "Ohne Terminal bitte mit -y bestätigen (nach einem Probelauf mit --dry-run)."
+    echo
+    echo "ACHTUNG: Die jetzige Konfiguration wird durch die Sicherung ersetzt. Konten, die danach angelegt wurden, fehlen dann in"
+    echo "data/config/postfix-accounts.cf (ihre Mails bleiben erhalten)."
+    read -r -p "Zum Bestätigen WIEDERHERSTELLEN eintippen: " ans
+    [[ "$ans" == "WIEDERHERSTELLEN" ]] || die "Abgebrochen. Es wurde nichts verändert."
+  fi
+  say "Jetzigen Stand sichern"
+  mkdir -p "$SAFE"
+  cp -a docker-compose.yml .env "$SAFE/" 2>/dev/null || true
+  [[ ! -d data/config ]] || cp -a data/config "$SAFE/config"
+  [[ ! -d data/roundcube/config ]] || cp -a data/roundcube/config "$SAFE/roundcube-config"
+  chmod -R go-rwx "$CBDIR"
+  say "Container anhalten und Konfiguration wiederherstellen"
+  docker compose stop >/dev/null 2>&1 || echo "Hinweis: Die Container ließen sich nicht anhalten (laufen sie?)." >&2
+  for f in docker-compose.yml .env; do
+    [[ -f "$CS/$f" ]] || continue
+    cp -a "$CS/$f" "$BASE/$f"; echo "  $f"
+  done
+  if [[ -d "$CS/config" ]]; then mkdir -p data/config; rsync -a --numeric-ids --delete "$CS/config/" data/config/; echo "  data/config"; fi
+  if [[ -d "$CS/roundcube-config" ]]; then mkdir -p data/roundcube/config; rsync -a --numeric-ids --delete "$CS/roundcube-config/" data/roundcube/config/; echo "  data/roundcube/config"; fi
+  say "Container starten"
+  docker compose up -d
+  docker compose restart mailserver >/dev/null 2>&1 || true
+  say "Fertig"
+  echo "Konfiguration wiederhergestellt aus: $CS"
+  echo "Der Stand von vorher liegt in: $SAFE"
+  echo "Rückgängig machen: sudo ./restore-mail.sh --config ${SAFE##*/}"
+  exit 0
+fi
 
 # Backup-Ordner: Angabe, sonst aus dem Cron-Job von backup-mail.sh, sonst /mnt/mail-backup
 if [[ -z "$FROM" && -f "$CRON_DIR/mail-backup" ]]; then
