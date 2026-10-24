@@ -47,7 +47,7 @@ for n in chown chgrp apt-get systemctl; do ln -sf "$STUBS/noop" "$W/bin/$n"; don
 new_instance() {
   local d="$W/$1"; mkdir -p "$d/mcp" "$d/cron" "$d/logrotate" "$d/sudoers" "$d/log"
   local f
-  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh tailscale-setup.sh; do
+  for f in setup-mailserver.sh install.sh uninstall.sh backup-mail.sh usb-backup.sh tailscale-setup.sh restore-mail.sh; do
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
   done
   cp "$ROOT/mcp/install.sh" "$d/mcp/"
@@ -447,6 +447,80 @@ else
   check "--install: logrotate-Regel angelegt" test -f "$D/logrotate/mail-backup"
   run "$D" env HC_URL=http://unsicher bash backup-mail.sh --install "$B"
   check "--install: ungültige HC_URL wird abgelehnt" test "$RC" -ne 0
+fi
+
+# ---------------------------------------------------------------- 7b. Wiederherstellung
+title "7b. restore-mail.sh (Backup wiederherstellen)"
+if command -v rsync >/dev/null; then
+  D="$(new_instance restore)"; B="$W/restore-backup"; SN="$B/daily/2026-10-01_033000"
+  mkdir -p "$SN/data/mail-data/home.lan/anna/cur" "$SN/data/mail-data/home.lan/ben/cur" "$SN/data/config" "$B/monthly"
+  echo "alte mail anna" > "$SN/data/mail-data/home.lan/anna/cur/1"; echo "mail ben" > "$SN/data/mail-data/home.lan/ben/cur/1"
+  echo "anna@home.lan|x" > "$SN/data/config/postfix-accounts.cf"; echo "WEBMAIL_PORT=8081" > "$SN/accounts.conf"
+  ln -sfn "$SN" "$B/latest"
+  mkdir -p "$D/data/mail-data/home.lan/anna/cur" "$D/data/mail-data/home.lan/ben/cur"
+  echo "kaputt" > "$D/data/mail-data/home.lan/anna/cur/1"; echo "nur-jetzt" > "$D/data/mail-data/home.lan/anna/cur/2"
+  echo "ben aktuell" > "$D/data/mail-data/home.lan/ben/cur/1"; echo "WEBMAIL_PORT=9999" > "$D/accounts.conf"
+  AN="$D/data/mail-data/home.lan/anna/cur"; BN="$D/data/mail-data/home.lan/ben/cur"
+  run "$D" bash restore-mail.sh --list "$B"
+  check "--list zeigt den Snapshot und markiert den neuesten" bash -c "grep -q 'daily/2026-10-01_033000' '$D/out' && grep -q 'neuester' '$D/out'"
+  run "$D" bash restore-mail.sh --mailbox anna@home.lan --from "$B" --dry-run
+  check "Probelauf: nichts wird verändert" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$AN/1')\" == kaputt ]] && ! ls '$D'/data/vor-restore-* >/dev/null 2>&1"
+  run "$D" bash -c "bash restore-mail.sh --mailbox anna@home.lan --from '$B' </dev/null"
+  check "Ohne Terminal und ohne -y wird nicht ungefragt überschrieben" bash -c "[[ $RC -ne 0 ]] && grep -q -- '-y' '$D/out' && [[ \"\$(cat '$AN/1')\" == kaputt ]]"
+  run "$D" bash restore-mail.sh --mailbox anna@home.lan --from "$B" -y
+  check "Postfach: Datei kommt aus dem Backup zurück" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$AN/1')\" == 'alte mail anna' ]]"
+  check "Postfach: Datei, die nur im jetzigen Stand lag, ist weg" test ! -e "$AN/2"
+  check "Postfach: anderes Postfach bleibt unberührt" bash -c "[[ \"\$(cat '$BN/1')\" == 'ben aktuell' ]]"
+  check "Postfach: jetziger Stand ist gesichert (geänderte und gelöschte Datei)" bash -c "[[ \"\$(cat '$D'/data/vor-restore-*/cur/2)\" == nur-jetzt ]] && [[ \"\$(cat '$D'/data/vor-restore-*/cur/1)\" == kaputt ]]"
+  check "Mailserver wird angehalten, wieder gestartet und der Index neu aufgebaut" bash -c "grep -q 'docker compose stop mailserver' '$D/stub.args' && grep -q 'docker compose up -d' '$D/stub.args' && grep -q 'doveadm force-resync -u anna@home.lan' '$D/stub.args'"
+  run "$D" bash restore-mail.sh --mailbox anna@home.lan --from "$B" --snapshot ../../etc -y
+  check "Ungültiger Snapshot-Name wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Ungültiger Snapshot' '$D/out'"
+  run "$D" bash restore-mail.sh --mailbox anna@home.lan --from "$B" --snapshot daily/2020-01-01_000000 -y
+  check "Unbekannter Snapshot wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'nicht gefunden' '$D/out'"
+  run "$D" bash restore-mail.sh --mailbox ../../x@home.lan --from "$B" -y
+  check "Manipulierte Adresse wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Ungültige Adresse' '$D/out'"
+  run "$D" bash restore-mail.sh --mailbox carla@home.lan --from "$B" -y
+  check "Postfach, das im Snapshot fehlt, wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'gibt es in diesem Snapshot nicht' '$D/out'"
+  run "$D" bash restore-mail.sh --all --from "$W/gibt-es-nicht" -y
+  check "Fehlender Backup-Ordner wird gemeldet" bash -c "[[ $RC -ne 0 ]] && grep -q 'kein Backup' '$D/out'"
+  echo "kaputt2" > "$BN/1"
+  run "$D" bash restore-mail.sh --all --from "$B" -y
+  check "Alles: Postfächer, Konfiguration und accounts.conf kommen zurück" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$BN/1')\" == 'mail ben' ]] && [[ \"\$(cat '$D/accounts.conf')\" == 'WEBMAIL_PORT=8081' ]] && [[ -f '$D/data/config/postfix-accounts.cf' ]]"
+  check "Alles: accounts.conf hat Rechte 600, die alte liegt in der Sicherung" bash -c "[[ \$(stat -c %a '$D/accounts.conf') == 600 ]] && grep -rq 'WEBMAIL_PORT=9999' '$D'/data/vor-restore-*/accounts.conf"
+  check "Alles: Index wird für die Konten der Konfiguration neu aufgebaut" has "$D/stub.args" "doveadm force-resync -u anna@home.lan"
+  check "restore-mail.sh: Syntax" bash -n "$ROOT/restore-mail.sh"
+  # --- Konfigurationssicherung (config-backup/)
+  D2="$(new_instance restorecfg)"; CBD="$D2/config-backup"
+  for s in 20261001_100000 20261009_210934; do mkdir -p "$CBD/$s/config" "$CBD/$s/roundcube-config"; done
+  echo "alt-compose" > "$CBD/20261001_100000/docker-compose.yml"; echo "FETCHMAIL=0" > "$CBD/20261001_100000/.env"
+  echo "anna@home.lan|alt" > "$CBD/20261001_100000/config/postfix-accounts.cf"; echo "alt" > "$CBD/20261001_100000/roundcube-config/custom.inc.php"
+  echo "neu-compose" > "$CBD/20261009_210934/docker-compose.yml"; echo "FETCHMAIL=1" > "$CBD/20261009_210934/.env"
+  echo "anna@home.lan|neu" > "$CBD/20261009_210934/config/postfix-accounts.cf"; echo "neu" > "$CBD/20261009_210934/roundcube-config/custom.inc.php"
+  mkdir -p "$D2/data/config" "$D2/data/roundcube/config"
+  echo "jetzt-compose" > "$D2/docker-compose.yml"; echo "FETCHMAIL=9" > "$D2/.env"
+  echo "anna@home.lan|jetzt" > "$D2/data/config/postfix-accounts.cf"; echo "x" > "$D2/data/config/nur-jetzt.cf"; echo "jetzt" > "$D2/data/roundcube/config/custom.inc.php"
+  run "$D2" bash restore-mail.sh --list-config
+  check "--list-config zeigt beide Sicherungen mit Inhalt" bash -c "grep -q '20261001_100000' '$D2/out' && grep -q '20261009_210934' '$D2/out' && grep -q 'roundcube-config' '$D2/out'"
+  run "$D2" bash restore-mail.sh --config --dry-run
+  check "Konfiguration, Probelauf: nichts wird verändert" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$D2/docker-compose.yml')\" == jetzt-compose ]] && [[ -e '$D2/data/config/nur-jetzt.cf' ]] && ! ls '$CBD'/vor-restore-* >/dev/null 2>&1"
+  run "$D2" bash -c "bash restore-mail.sh --config </dev/null"
+  check "Konfiguration: ohne Terminal und ohne -y wird nicht ungefragt überschrieben" bash -c "[[ $RC -ne 0 ]] && [[ \"\$(cat '$D2/docker-compose.yml')\" == jetzt-compose ]]"
+  run "$D2" bash restore-mail.sh --config -y
+  check "Konfiguration: neueste Sicherung wird wiederhergestellt" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$D2/docker-compose.yml')\" == neu-compose ]] && [[ \"\$(cat '$D2/.env')\" == FETCHMAIL=1 ]] && [[ \"\$(cat '$D2/data/config/postfix-accounts.cf')\" == 'anna@home.lan|neu' ]] && [[ \"\$(cat '$D2/data/roundcube/config/custom.inc.php')\" == neu ]]"
+  check "Konfiguration: Dateien, die es in der Sicherung nicht gab, sind weg" test ! -e "$D2/data/config/nur-jetzt.cf"
+  check "Konfiguration: der jetzige Stand ist vorher gesichert" bash -c "[[ \"\$(cat '$CBD'/vor-restore-*/docker-compose.yml)\" == jetzt-compose ]] && ls '$CBD'/vor-restore-*/config/nur-jetzt.cf >/dev/null"
+  check "Konfiguration: Container werden angehalten, gestartet und der Mailserver neu gestartet" bash -c "grep -q 'docker compose stop' '$D2/stub.args' && grep -q 'docker compose up -d' '$D2/stub.args' && grep -q 'docker compose restart mailserver' '$D2/stub.args'"
+  run "$D2" bash restore-mail.sh --config 20261001_100000 -y
+  check "Konfiguration: bestimmte ältere Sicherung wählbar" bash -c "[[ $RC -eq 0 ]] && [[ \"\$(cat '$D2/docker-compose.yml')\" == alt-compose ]]"
+  check "Konfiguration: zwei Wiederherstellungen hintereinander sichern getrennt" test "$(ls -d "$CBD"/vor-restore-* | wc -l)" -eq 2
+  run "$D2" bash restore-mail.sh --config -y
+  check "Konfiguration: 'neueste' ignoriert die Sicherungen vor einer Wiederherstellung" bash -c "[[ \"\$(cat '$D2/docker-compose.yml')\" == neu-compose ]]"
+  run "$D2" bash restore-mail.sh --config ../etc -y
+  check "Konfiguration: ungültiger Name wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Ungültiger Name' '$D2/out'"
+  run "$D2" bash restore-mail.sh --config 20200101_000000 -y
+  check "Konfiguration: unbekannte Sicherung wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'nicht gefunden' '$D2/out'"
+else
+  skip "rsync fehlt: Wiederherstellungs-Tests"
 fi
 
 # ---------------------------------------------------------------- 8. Deinstallation

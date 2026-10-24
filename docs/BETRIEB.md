@@ -92,17 +92,50 @@ der Stick, wird nichts auf die Systemplatte geschrieben, und das Backup meldet e
 Die Variablen werden mit `--install` in die Cron-Zeile übernommen, z. B.
 `sudo KEEP_DAYS=30 REQUIRE_MOUNT=1 HC_URL=https://hc-ping.com/xxxx ./backup-mail.sh --install /mnt/backup/mail`.
 
-**Wiederherstellen** (Beispiel: ein Postfach):
+### Wiederherstellen
+
+Mit `restore-mail.sh` (der Backup-Ordner wird aus dem Cron-Job erkannt, sonst `--from /mnt/mail-backup`):
+
+```bash
+sudo ./restore-mail.sh --list                                 # Snapshots anzeigen
+sudo ./restore-mail.sh --mailbox anna@home.lan --dry-run      # ansehen, was sich ändern würde (ändert nichts)
+sudo ./restore-mail.sh --mailbox anna@home.lan                # ein Postfach aus dem neuesten Snapshot
+sudo ./restore-mail.sh --mailbox anna@home.lan --snapshot daily/2026-10-01_033000
+sudo ./restore-mail.sh --all                                  # alles: Mails, Konfiguration, Webmail, accounts.conf, .env
+```
+
+Ohne `-y` musst du `WIEDERHERSTELLEN` eintippen. Das Skript hält den Mailserver für die Dauer an, startet ihn danach wieder und baut den Index
+neu auf (`doveadm force-resync`). **Der jetzige Stand wird vorher gesichert** in `data/vor-restore-<Zeit>/` (geänderte und gelöschte Dateien,
+bei `--all` auch die alte `accounts.conf`); nach der Kontrolle löschen. Das Backup selbst wird nie verändert. Mails, die nur im jetzigen Stand
+liegen, werden beim Wiederherstellen entfernt, bleiben aber in dieser Sicherung erhalten.
+
+**Nur die Konfiguration** (nicht die Mails) kommt aus `config-backup/`. Die legt `setup-mailserver.sh` bei jeder Aktualisierung (`--update`)
+automatisch an: `docker-compose.yml`, `.env`, `data/config` (Konten, Relay, fetchmail, Zertifikate ...) und die Roundcube-Konfiguration.
+
+```bash
+sudo ./restore-mail.sh --list-config                       # Sicherungen anzeigen
+sudo ./restore-mail.sh --config --dry-run                  # ansehen, was sich ändern würde (ändert nichts)
+sudo ./restore-mail.sh --config                            # neueste Sicherung wiederherstellen
+sudo ./restore-mail.sh --config 20261009_210934            # eine bestimmte
+sudo ./restore-mail.sh --config vor-restore-20261024-153000   # die letzte Wiederherstellung rückgängig machen
+```
+
+Vorher wird der jetzige Stand in `config-backup/vor-restore-<Zeit>/` gesichert, damit sich jede Wiederherstellung rückgängig machen lässt. Danach
+werden die Container neu gestartet. **Achtung:** Konten, die nach der Sicherung angelegt wurden, fehlen dann in `data/config/postfix-accounts.cf`
+(ihre Mails bleiben unter `data/mail-data` erhalten); neu anlegen mit `./setup-mailserver.sh --update`. Ein einzelnes Backup der
+`accounts.conf` (`accounts.conf.bak-*`) kopierst du von Hand zurück: `sudo cp -p accounts.conf.bak-<Zeit> accounts.conf`.
+
+**Frischer Server (alles ist weg):** Dateien neu laden (`get.sh`), den Backup-Stick einhängen (`sudo ./usb-backup.sh --setup /dev/sdb1`, das Dateisystem
+bleibt erhalten), dann `sudo ./restore-mail.sh --all` und `sudo ./setup-mailserver.sh --update`.
+
+Von Hand geht es auch (ein Postfach):
 
 ```bash
 docker compose stop mailserver
-rsync -a /mnt/backup/mail/daily/<Datum>/data/mail-data/deinedomain.at/anna/ \
-         data/mail-data/deinedomain.at/anna/
+rsync -a /mnt/backup/mail/daily/<Datum>/data/mail-data/deinedomain.at/anna/ data/mail-data/deinedomain.at/anna/
 docker compose start mailserver
 docker exec mailserver doveadm force-resync -u anna@deinedomain.at '*'
 ```
-
-Besitzer und Rechte stellt `rsync` selbst wieder her.
 
 **Empfehlungen:**
 - Das Ziel muss ein **anderes Laufwerk, NAS oder ein anderer Rechner** sein. Eine zweite Kopie außer Haus schützt vor Diebstahl und Brand.
