@@ -46,6 +46,22 @@ docker compose restart mailserver
 - **Image-Versionen:** Die Images sind auf getestete Versionen festgelegt (siehe `setup-mailserver.sh`, Abschnitt "Festgelegte Versionen",
   oder `.env`). Mit `DMS_TAG=...` usw. in `accounts.conf` lässt sich eine andere Version erzwingen.
 
+## Server aktualisieren
+
+Dateien auf den neuesten Stand bringen (`accounts.conf` und `data/` bleiben erhalten; `get.sh` erkennt den vorhandenen Ordner selbst, sonst
+`MAILSERVER_DIR=/pfad` angeben), dann aktualisieren:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/friedlro/Eigener-Mailserver-mit-gmail-gmax-und-yahoo-schnittselle/main/get.sh | sudo bash -s -- --web
+#   startet die Web-Oberfläche; mit Strg+C beenden, wenn du nichts neu installieren willst
+cd /home/roland/mailserver          # dein Ordner
+sudo ./setup-mailserver.sh --check  # nur die Anmeldungen bei den Anbietern testen
+sudo ./setup-mailserver.sh --update # Konfiguration neu schreiben, Mailserver neu starten, nichts importieren
+```
+
+`--update` sichert die Konfiguration vorher in `config-backup/`, importiert nichts neu, ändert keine Passwörter und fasst `data/mail-data` nicht an.
+Übrig gebliebene Container (`ddns`, `cloudflared`) einer früheren Einrichtung werden dabei entfernt.
+
 ## Backup
 
 `backup-mail.sh` legt tägliche Snapshots des gesamten Ordners an (Mails, Konfiguration, Webmail-Daten, `accounts.conf`). Unveränderte
@@ -186,6 +202,9 @@ Von Hand sofort: `./setup-mailserver.sh --cleanup` (nach der Konfiguration) oder
 |---|---|
 | `Ungültige Kontozeile` / `Anbieter ... nicht erkannt` | Format `adresse\|passwort\|lokalname\|lokales-passwort\|quota\|anbieter`. Bei fremden Domains den Anbieter (gmail, gmx, yahoo) im sechsten Feld eintragen. Kein `\|` in Passwörtern. |
 | Senden scheitert mit `550 Sender address is not allowed` (GMX) | Der Anbieter erlaubt als Absender nur die eigene Adresse. Seit dieser Version schreibt der Server beim Senden die lokale Adresse (`name@home.lan`) auf die Adresse beim Anbieter um (`postfix-generic.cf`, `smtp_generic_maps`). Dateien aktualisieren (Installationsbefehl erneut ausführen, `accounts.conf` bleibt) und `sudo ./setup-mailserver.sh --update` starten; das startet den Mailserver neu. |
+| Webmail: beim Anmelden „Verbindung zum Server fehlgeschlagen" | Roundcube prüft das Zertifikat des Mailservers streng. Passt dessen Name nicht zum Servernamen (`hostname:` in `docker-compose.yml`), lehnt es die Verbindung ab. Typisch nach einer Änderung von `DOMAIN` oder bei einem Zertifikat aus einer früheren Einrichtung. Prüfen: `grep hostname: docker-compose.yml` und `sudo openssl x509 -in data/certs/cert.pem -noout -subject -ext subjectAltName`. Seit dieser Version erneuert `setup-mailserver.sh` ein selbst signiertes Zertifikat mit falschem Namen selbst (das alte liegt in `data/certs-alt/`): `sudo ./setup-mailserver.sh --update`. Mit Let's Encrypt: `data/certbot/live/` muss den Servernamen enthalten. Test aus Roundcube: `docker exec roundcube php -r '$c=stream_context_create(["ssl"=>["cafile"=>"/certs/cert.pem","verify_peer"=>true,"verify_peer_name"=>true]]);$s=@stream_socket_client("ssl://SERVERNAME:993",$e,$m,10,STREAM_CLIENT_CONNECT,$c);echo $s?"OK\n":"FEHLER: $m\n";'` (SERVERNAME = der Name aus `hostname:`) |
+| Webmail öffnet sich von einem anderen Rechner nicht | Mit `WEBMAIL_BIND=127.0.0.1` lauscht es nur auf dem Server. Zugriff über `tailscale serve` (`https://<name>.ts.net`), einen SSH-Tunnel (`ssh -L 8080:127.0.0.1:8080 benutzer@server`, dann `http://localhost:8080`) oder `WEBMAIL_BIND=0.0.0.0` und `--update`. Siehe [ZUGRIFF.md](ZUGRIFF.md). |
+| Server heißt `mail.mail.deinedomain.at` (doppeltes `mail.`) | `DOMAIN` ist mit `mail.` eingetragen. Das Skript setzt `mail.` selbst davor: `DOMAIN=deinedomain.at` eintragen. Bei bestehenden Konten bleibt die Mail-Adresse, wenn sie als vollständige Adresse im dritten Feld der Kontozeile steht. |
 | `ANMELDUNG ABGELEHNT` bei `--check` | Gmail/Yahoo: App-Passwort statt normalem Passwort. GMX: POP3/IMAP in den Einstellungen freischalten. Beim Anbieter ggf. Zwei-Faktor prüfen. |
 | Import schlägt fehl | Die Meldung direkt über "Import fehlgeschlagen" lesen. Zuerst `--check`. `bandwidth limits` oder `too many connections`: der Anbieter drosselt, später erneut starten. |
 | Es kommen keine neuen Mails | `docker logs --tail 100 mailserver 2>&1 \| grep -i fetchmail`. Bei GMX: Freischaltung abgelaufen? `--check`. Bei Gmail: POP auf "ab jetzt" und "Kopie löschen"? |

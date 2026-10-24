@@ -399,6 +399,14 @@ else
   # Wurde Cloudflare/Let's Encrypt abgeschaltet (z. B. Umstellung auf Tailscale): Token und Erneuerungs-Job entfernen
   rm -f data/cloudflare.ini "$CRON_DIR/mailserver-certbot"
   say "Self-signed Zertifikat erzeugen"
+  # Ein vorhandenes Zertifikat gilt nur, wenn sein Name zum Servernamen passt. Sonst (z. B. nach einer Änderung von DOMAIN oder
+  # bei einem Zertifikat aus einer früheren Einrichtung) lehnt Roundcube die Verbindung zum Mailserver ab: "Verbindung zum Server fehlgeschlagen".
+  if [[ -f data/certs/cert.pem ]] && openssl x509 -in data/certs/cert.pem -noout -checkhost "$FQDN" 2>/dev/null | grep -q 'does NOT match'; then
+    ALT="data/certs-alt/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$ALT"; mv data/certs/cert.pem "$ALT/"; mv data/certs/key.pem "$ALT/" 2>/dev/null || true
+    chmod -R go-rwx data/certs-alt
+    echo "  Das vorhandene Zertifikat gehört nicht zu $FQDN und wurde nach $ALT verschoben; ein neues wird erzeugt."
+  fi
   if [[ ! -f data/certs/cert.pem ]]; then
     openssl req -x509 -nodes -newkey rsa:4096 -days 3650 \
       -keyout data/certs/key.pem -out data/certs/cert.pem \

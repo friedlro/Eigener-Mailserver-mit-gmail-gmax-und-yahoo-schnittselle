@@ -64,6 +64,29 @@ In `claude_desktop_config.json` (Benutzer und IP anpassen):
 Voraussetzung ist ein SSH-Login ohne Passwort (Schlüssel oder Tailscale SSH). Über Umgebungsvariablen lassen sich `MAIL_DIR`, `MAIL_CONTAINER`,
 `BACKUP_DIR`, `BACKUP_SCRIPT` und `WEBMAIL_PORT` anpassen.
 
+## Wenn die Verbindung fehlschlägt
+
+Die Anbindung besteht aus drei Teilen. Prüfe sie der Reihe nach; der erste Fehlschlag ist die Ursache.
+
+1. **Tailscale:** Beide Geräte müssen im selben Tailnet angemeldet und online sein (`tailscale status`). `tailscale ping 100.x.y.z` auf dem Rechner mit
+   Claude Desktop muss antworten. Abgelaufene Schlüssel stehen unter <https://login.tailscale.com/admin/machines>.
+2. **SSH:** `ssh benutzer@100.x.y.z echo ok` in PowerShell muss `ok` ausgeben. Bei Tailscale SSH steht im Debug `Authenticated … using "none"`; die Meldungen über fehlende
+   Schlüsseldateien (`id_rsa` …) sind harmlos.
+   - `Permission denied`: auf dem Server `sudo tailscale set --ssh=true`; im Tailnet muss eine SSH-Regel den Zugriff erlauben.
+   - `Tailscale SSH requires an additional check`: Tailscale verlangt im Modus `check` eine Bestätigung im Browser (alle 12 Stunden). Der Eintrag nutzt `BatchMode=yes` und kann
+     diesen Link nicht anzeigen. Einmal von Hand mit `ssh benutzer@100.x.y.z` verbinden und bestätigen, oder in den Tailscale-Regeln die Aktion für dieses Gerät auf `accept` ändern
+     (eine Sicherheitsentscheidung).
+3. **MCP-Server:** Genau den Aufruf von Claude Desktop testen:
+   ```powershell
+   '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ssh -T -o BatchMode=yes benutzer@100.x.y.z python3 /home/benutzer/mailserver/mcp/server.py
+   ```
+   Kommt eine JSON-Antwort mit Werkzeugen (`mail_health` …), läuft der Server. `No such file`: Pfad prüfen oder `sudo bash mcp/install.sh <ordner>` ausführen.
+4. **Claude Desktop:** Findet es `ssh` nicht (anderer Suchpfad als PowerShell), den vollen Pfad eintragen: `"command": "C:\\Windows\\System32\\OpenSSH\\ssh.exe"` (in JSON müssen die
+   Rückwärtsstriche verdoppelt werden). Der Status und das Log jedes Eintrags stehen unter *Einstellungen → Entwickler*. Danach Claude Desktop neu starten.
+
+Der MCP-Server hat keine Internetadresse und lässt sich deshalb nicht unter claude.ai → Konnektoren eintragen; er wird immer über den `mcpServers`-Eintrag per SSH gestartet.
+Für Claude Code im Terminal: `claude mcp add mailserver -- ssh -T -o BatchMode=yes benutzer@100.x.y.z python3 /home/benutzer/mailserver/mcp/server.py`.
+
 ## Sicherheit
 
 Der Server läuft mit den Rechten des SSH-Benutzers, der Docker steuern darf. Das entspricht praktisch Root-Zugriff auf den Server. Nutzen Sie
