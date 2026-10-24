@@ -196,6 +196,25 @@ GMAIL_SENT_DAYS=30
 **Vorher ansehen, was gelöscht würde (ändert nichts):** `sudo ./setup-mailserver.sh --cleanup --dry-run`.
 Von Hand sofort: `./setup-mailserver.sh --cleanup` (nach der Konfiguration) oder `--empty-trash` (Papierkorb bei allen Anbietern).
 
+## Zur Seite gelegte Mails zurückholen
+
+Wurde `DOMAIN` einmal falsch gesetzt, können Mails in einem zweiten Postfach landen (`data/mail-data/<falsche-domain>/<name>`). Lege diese Ordner zur Seite, statt sie zu löschen:
+
+```bash
+sudo mkdir -p data/alt-mailboxen
+sudo mv data/mail-data/<falsche-domain> data/alt-mailboxen/
+sudo ./setup-mailserver.sh --update
+```
+
+Dann übernimmt `merge_mailboxes.py` nur die Mails, die im richtigen Postfach noch fehlen (Abgleich über die Message-ID, ohne Doppelte):
+
+```bash
+sudo python3 merge_mailboxes.py            # Probelauf: zeigt nur die Zahlen
+sudo python3 merge_mailboxes.py --apply    # kopiert und baut den Dovecot-Index neu auf
+```
+
+Die Quelle wird nie verändert. Das Zielkonto muss existieren. Mit `--user NAME` lässt sich ein einzelnes Postfach wählen, mit `--domain` die Ziel-Domain (Standard: `DOMAIN` aus `accounts.conf`).
+
 ## Fehlersuche
 
 | Problem | Ursache und Lösung |

@@ -455,6 +455,9 @@ fi
     echo "\$config['smtp_conn_options'] = ['ssl' => ['verify_peer' => true, 'verify_peer_name' => true, 'cafile' => '/certs/cert.pem']];"
   fi
 } > data/roundcube/config/custom.inc.php
+# Roundcube läuft im Container als www-data und muss die Datei lesen können (sie enthält keine Geheimnisse, nur %u/%p-Platzhalter).
+# Bei Rechte 600 (z. B. durch eine strenge umask) wird sie still ignoriert, die Zertifikatsprüfung scheitert mit "unknown ca".
+chmod 644 data/roundcube/config/custom.inc.php
 
 # ---------------------------------------------------------------- .env (Versionen, Geheimnisse, Abholung)
 # Die Geheimnisse stehen nur hier (Rechte 640, Gruppe docker), nicht in docker-compose.yml.

@@ -147,6 +147,7 @@ check "Compose: Webmail nur lokal"   has "$CO" "127.0.0.1:9090:80"
 check "Compose: Versionen aus .env"  has "$CO" 'docker-mailserver:${DMS_TAG}'
 check "Compose: Log-Begrenzung"      has "$CO" "max-size"
 check "Compose: Roundcube vertraut dem eigenen Zertifikat" has "$D/data/roundcube/config/custom.inc.php" "'cafile' => '/certs/cert.pem'"
+check "Roundcube: custom.inc.php ist für den Container lesbar (644)" test "$(stat -c %a "$D/data/roundcube/config/custom.inc.php")" = 644
 check "Roundcube: Zertifikatsprüfung bleibt an" hasnt "$D/data/roundcube/config/custom.inc.php" "'verify_peer' => false"
 if [[ -n "$REAL_DOCKER" ]]; then check "docker compose config: Datei ist gültig" compose_ok "$D"; else skip "docker nicht vorhanden (compose config)"; fi
 check "private Schlüsseldatei hat Rechte 600" perm "$D/data/certs/key.pem" 600
@@ -300,6 +301,8 @@ run "$D" bash setup-mailserver.sh --cleanup
 check "Ältere GMAIL_EMPTY_TRASH-Einstellung funktioniert weiter" bash -c "f=\"$(cl anna@gmail.com)\"; grep -qx 'CL_TRASH=1' \"\$f\" && grep -qx 'CL_DAYS=30' \"\$f\""
 check "cleanup.py ist gültiges Python" python3 -I -m py_compile "$ROOT/cleanup.py"
 check "cleanup.py: Tests mit nachgebautem IMAP-Server" python3 -I "$ROOT/tests/test_cleanup.py"
+check "merge_mailboxes.py ist gültiges Python" python3 -I -m py_compile "$ROOT/merge_mailboxes.py"
+check "merge_mailboxes.py: Tests mit nachgebauten Postfächern" python3 -I "$ROOT/tests/test_merge.py"
 
 # ---------------------------------------------------------------- 5c. USB-Backup
 title "5c. usb-backup.sh (USB-Datenträger als Backup-Ziel)"
