@@ -26,6 +26,7 @@ sondern auf einem Entwicklungsrechner oder in einer Test-VM.
 | Aufräumen beim Anbieter | je Anbieter: Auswahl, Probelauf, Altersgrenze, Gmail-Posteingang erst nach Import, Message-ID-Abgleich, Papierkorb/Spam, Fehler und fehlende Ordner (`tests/test_cleanup.py` mit nachgebautem IMAP-Server) |
 | USB-Backup | nur USB-Datenträger (nie System-/interne Platte, nie ein Stick mit laufendem System), ungültige Namen, NTFS nur nach `--format`, fstab (UUID, nofail), Aushängen, Cron mit `REQUIRE_MOUNT`, `--remove` (`tests/fixtures/lsblk.json`, Platzhalter für mount/mkfs/blkid) |
 | Tailscale und MCP | Anmeldelink wird ausgegeben und in der Oberfläche erkannt, bereits angemeldet, SSH nachträglich, Reihenfolge Tailscale → Installation → MCP → Backup, Benutzerprüfung (kein root, muss existieren), nicht beim Zugangsdaten-Test (Platzhalter für `tailscale`) |
+| Wiederherstellung | Probelauf ändert nichts, Rückfrage ohne Terminal, ein Postfach und alles, Sicherung des jetzigen Stands, Mailserver anhalten/starten, Index neu aufbauen, ungültige Snapshot-/Adressangaben |
 | Web-Oberfläche | Anmeldung, Passwortsperre, Eingabeprüfung, accounts.conf (Rechte, Sicherung), Protokoll mit Exit-Code, Beenden (`tests/test_webui.py`, mit Platzhalter-Setup) |
 | Deinstallation | entfernt Konfiguration, Cron und Container, **lässt `data/` ohne ausdrückliche Auswahl unberührt** |
 
