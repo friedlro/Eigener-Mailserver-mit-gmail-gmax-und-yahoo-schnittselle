@@ -389,6 +389,19 @@ MIGARGS=(-y --no-backup --dry-run); mig
 check "Zweiter Aufruf: erkennt, dass Cloudflare schon weg ist" has "$D/out" "keine Einträge mehr in accounts.conf"
 check "migrate-to-tailscale.sh: Syntax" bash -n "$ROOT/migrate-to-tailscale.sh"
 
+# ---------------------------------------------------------------- 5f. Zertifikat passt nicht zum Servernamen
+title "5f. Selbst signiertes Zertifikat wird erneuert, wenn es nicht zum Servernamen passt"
+D="$(new_instance cert)"; mkdir -p "$D/data/certs"
+openssl req -x509 -nodes -newkey rsa:2048 -days 30 -keyout "$D/data/certs/key.pem" -out "$D/data/certs/cert.pem" -subj "/CN=mail.alter-name.example" -addext "subjectAltName=DNS:mail.alter-name.example" 2>/dev/null
+printf '%s\n' 'DOMAIN=example.at' 'anna@gmail.com|abcdabcdabcdabcd|anna' > "$D/accounts.conf"
+run "$D" bash setup-mailserver.sh -y
+check "Zertifikat mit falschem Namen: neues Zertifikat passt zu mail.example.at" bash -c "openssl x509 -in '$D/data/certs/cert.pem' -noout -checkhost mail.example.at | grep -q 'does match'"
+check "Zertifikat mit falschem Namen: das alte ist gesichert (nicht gelöscht)" bash -c "openssl x509 -in '$D'/data/certs-alt/*/cert.pem -noout -subject | grep -q 'alter-name'"
+check "Zertifikat mit falschem Namen: Hinweis in der Ausgabe" has "$D/out" "gehört nicht zu mail.example.at"
+HASH1="$(sha256sum "$D/data/certs/cert.pem" | cut -d' ' -f1)"
+run "$D" bash setup-mailserver.sh -y
+check "Passendes Zertifikat bleibt bei jedem Lauf unverändert" bash -c "[[ \"\$(sha256sum '$D/data/certs/cert.pem' | cut -d' ' -f1)\" == '$HASH1' ]] && [[ \$(ls -d '$D'/data/certs-alt/* | wc -l) -eq 1 ]]"
+
 # ---------------------------------------------------------------- 6. Installationsassistent
 title "6. install.sh (Menüoberfläche) und Zusammenspiel mit setup-mailserver.sh"
 D="$(new_instance wizard)"

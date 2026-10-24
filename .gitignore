@@ -16,3 +16,8 @@ data/
 # Python
 __pycache__/
 *.pyc
+
+# Build- und Download-Reste
+*.whl
+*.egg-info/
+*.tar.gz

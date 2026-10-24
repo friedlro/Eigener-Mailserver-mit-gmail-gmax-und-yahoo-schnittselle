@@ -106,3 +106,22 @@ Tailnet sein. Das Zertifikat ist selbst signiert, die Mail-App fragt einmal nach
 Noch von Hand bei Cloudflare: DNS-Einträge und Tunnel löschen, API-Token widerrufen; im Router die Portfreigaben für 993 und 587 entfernen.
 
 **Rückgängig:** `sudo ./restore-mail.sh --config vor-tailscale-<Zeit>` und `sudo cp -p accounts.conf.bak-<Zeit> accounts.conf`, dann `sudo ./setup-mailserver.sh --update`.
+
+## Webmail im Tailnet erreichen
+
+Das Webmail lauscht mit `WEBMAIL_BIND=127.0.0.1` nur auf dem Server selbst. Von einem anderen Gerät im Tailnet gibt es drei Wege:
+
+1. **`tailscale serve` (dauerhaft, HTTPS, nur im Tailnet).** Auf dem Server:
+   ```bash
+   sudo tailscale serve --bg --https=443 http://127.0.0.1:8080
+   tailscale serve status
+   ```
+   Das Webmail ist dann unter `https://<servername>.<tailnet>.ts.net` erreichbar. Dafür muss im Tailnet „HTTPS-Zertifikate" aktiviert sein
+   (<https://login.tailscale.com/admin/dns>). `migrate-to-tailscale.sh` richtet das automatisch ein.
+2. **SSH-Tunnel (zum Testen, nichts am Server ändern).** In PowerShell: `ssh -L 8080:127.0.0.1:8080 benutzer@100.x.y.z`, dann im Browser `http://localhost:8080`.
+3. **Für alle Adressen öffnen:** `WEBMAIL_BIND=0.0.0.0` in `accounts.conf`, dann `sudo ./setup-mailserver.sh --update`. Das Webmail ist dann ohne
+   Verschlüsselung (HTTP) im ganzen Heimnetz erreichbar; nur nehmen, wenn die anderen Wege nicht reichen.
+
+**Anmelden** kannst du mit der **lokalen** Adresse (z. B. `roland@gmailserver.<tailnet>.ts.net`, nicht mit der Adresse bei GMX, Yahoo oder Gmail)
+und dem lokalen Passwort aus `zugangsdaten.txt`. Passwort ändern: `docker exec -it mailserver setup email update <adresse>`.
+
