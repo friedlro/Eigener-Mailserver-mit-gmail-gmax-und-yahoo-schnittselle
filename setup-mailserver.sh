@@ -626,10 +626,11 @@ mv data/config/postfix-main.cf.neu data/config/postfix-main.cf
 
 # smtp_generic_maps gilt für jeden SMTP-Weg von Postfix, auch für die Übergabe an den Spam-Filter (Dienst smtp-amavis). Dort würde
 # die lokale EMPFÄNGER-Adresse umgeschrieben, die Mail verließe den Server Richtung Anbieter und käme nie im Postfach an.
-# Deshalb gilt die Umschreibung nur beim Senden zum Anbieter, nicht bei der internen Übergabe.
+# Deshalb gilt die Umschreibung nur beim Senden zum Anbieter, nicht bei der internen Übergabe. (Ein leerer Wert wird von Postfix/
+# docker-mailserver nicht übernommen, darum eine Karte, die nie etwas findet.)
 touch data/config/postfix-master.cf
 { grep -v '^smtp-amavis/unix/smtp_generic_maps' data/config/postfix-master.cf || true
-  echo 'smtp-amavis/unix/smtp_generic_maps ='; } > data/config/postfix-master.cf.neu
+  echo 'smtp-amavis/unix/smtp_generic_maps=texthash:/dev/null'; } > data/config/postfix-master.cf.neu
 mv data/config/postfix-master.cf.neu data/config/postfix-master.cf
 
 # ---------------------------------------------------------------- Start

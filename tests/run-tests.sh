@@ -125,7 +125,7 @@ GM="$D/data/config/postfix-generic.cf"
 check "Absender: lokale Adresse wird auf die Anbieter-Adresse umgeschrieben (GMX, Yahoo, Gmail)" bash -c "grep -qx 'ben@home.lan ben@gmx.de' '$GM' && grep -qx 'clara@home.lan clara@yahoo.com' '$GM' && grep -qx 'anna@home.lan anna@gmail.com' '$GM'"
 check "Absender: Postfix liest die Zuordnung (smtp_generic_maps)" has "$D/data/config/postfix-main.cf" "smtp_generic_maps = texthash:/tmp/docker-mailserver/postfix-generic.cf"
 PM="$D/data/config/postfix-master.cf"
-check "Absender: Umschreibung gilt nicht für die Übergabe an den Spam-Filter (sonst verlässt lokale Post den Server)" bash -c "[[ \$(grep -c '^smtp-amavis/unix/smtp_generic_maps =\$' '$PM') -eq 1 ]]"
+check "Absender: Umschreibung gilt nicht für die Übergabe an den Spam-Filter (sonst verlässt lokale Post den Server)" bash -c "[[ \$(grep -c '^smtp-amavis/unix/smtp_generic_maps=texthash:/dev/null\$' '$PM') -eq 1 ]]"
 check "SASL-Daten pro Konto" has "$SP" "ben@home.lan ben@gmx.de:GmxPass\"with\\back\$dollar'q"
 check "SASL-Datei hat Rechte 600" perm "$SP" 600
 check "6 lokale Konten angelegt" test "$(grep -c '@home.lan|' "$D/data/config/postfix-accounts.cf")" -eq 6
