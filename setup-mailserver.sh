@@ -624,6 +624,14 @@ touch data/config/postfix-main.cf
   echo 'smtp_generic_maps = texthash:/tmp/docker-mailserver/postfix-generic.cf'; } > data/config/postfix-main.cf.neu
 mv data/config/postfix-main.cf.neu data/config/postfix-main.cf
 
+# smtp_generic_maps gilt für jeden SMTP-Weg von Postfix, auch für die Übergabe an den Spam-Filter (Dienst smtp-amavis). Dort würde
+# die lokale EMPFÄNGER-Adresse umgeschrieben, die Mail verließe den Server Richtung Anbieter und käme nie im Postfach an.
+# Deshalb gilt die Umschreibung nur beim Senden zum Anbieter, nicht bei der internen Übergabe.
+touch data/config/postfix-master.cf
+{ grep -v '^smtp-amavis/unix/smtp_generic_maps' data/config/postfix-master.cf || true
+  echo 'smtp-amavis/unix/smtp_generic_maps ='; } > data/config/postfix-master.cf.neu
+mv data/config/postfix-master.cf.neu data/config/postfix-master.cf
+
 # ---------------------------------------------------------------- Start
 say "Container starten"
 if [[ "$MODE" == "update" ]]; then

@@ -69,6 +69,23 @@ jobs:
           test "$(docker exec mailserver postmap -q ben@home.lan texthash:/tmp/docker-mailserver/postfix-generic.cf)" = "ben@gmx.de"
           test "$(docker exec mailserver postmap -q clara@home.lan texthash:/tmp/docker-mailserver/postfix-generic.cf)" = "clara@yahoo.com"
 
+      - name: Mail an ein lokales Konto kommt im Postfach an (Umschreibung darf die Zustellung nicht nach außen lenken)
+        run: |
+          docker exec mailserver postconf -P smtp-amavis/unix/smtp_generic_maps
+          docker exec mailserver sh -c 'grep -E "^smtp-amavis" -A8 /etc/postfix/master.cf | grep -q "smtp_generic_maps="'
+          docker exec mailserver sh -c 'printf "From: extern@example.org\nTo: anna@home.lan\nSubject: Zustelltest\n\nText\n" | sendmail -f extern@example.org anna@home.lan'
+          n=0
+          for i in $(seq 1 40); do
+            n="$(docker exec mailserver doveadm search -u anna@home.lan mailbox INBOX subject Zustelltest | wc -l)"
+            [ "$n" -ge 1 ] && break
+            sleep 2
+          done
+          echo "Zugestellt: $n"
+          docker exec mailserver postqueue -p
+          docker logs --since 5m mailserver 2>&1 | grep -E 'to=<anna' | tail -n 5 || true
+          test "$n" -ge 1
+          if docker logs --since 5m mailserver 2>&1 | grep -q 'to=<anna@gmail.com>'; then echo 'FEHLER: lokale Mail wurde an den Anbieter geschickt'; exit 1; fi
+
       - name: Webmail antwortet
         run: |
           for i in $(seq 1 30); do
