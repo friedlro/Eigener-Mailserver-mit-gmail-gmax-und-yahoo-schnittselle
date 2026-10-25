@@ -80,8 +80,8 @@ jobs:
             reply() { local l; while read -r -t 20 -u 3 l; do echo "< $l"; [[ "${l:3:1}" == "-" ]] || break; done; }
             send() { echo "> $1"; printf "%s\r\n" "$1" >&3; reply; }
             reply
-            send "EHLO ci.example.org"; send "MAIL FROM:<extern@example.org>"; send "RCPT TO:<anna@home.lan>"; send "DATA"
-            printf "From: extern@example.org\r\nTo: anna@home.lan\r\nSubject: Zustelltest\r\n\r\nText\r\n.\r\n" >&3; reply
+            send "EHLO ci.example.org"; send "MAIL FROM:<extern@gmail.com>"; send "RCPT TO:<anna@home.lan>"; send "DATA"
+            printf "From: extern@gmail.com\r\nTo: anna@home.lan\r\nSubject: Zustelltest\r\n\r\nText\r\n.\r\n" >&3; reply
             send "QUIT"'
           n=0
           for i in $(seq 1 40); do
