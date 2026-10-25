@@ -74,13 +74,15 @@ jobs:
           # Die Einstellung muss im LAUFENDEN Postfix stehen (nicht nur in der Datei)
           docker exec mailserver postconf -M smtp-amavis/unix | tr ' ' '\n' | grep -x 'smtp_generic_maps=texthash:/dev/null'
           # Zustellung wie fetchmail: SMTP an Port 25 im Container (der Port ist nicht nach außen veröffentlicht), Absender von außen, Empfänger lokal
+          # (auf jede Antwort warten, sonst weist postscreen die Verbindung als PREGREET ab)
           docker exec mailserver bash -c '
             exec 3<>/dev/tcp/127.0.0.1/25
-            read -r -t 10 -u 3 banner; echo "$banner"
-            send() { printf "%s\r\n" "$1" >&3; sleep 1; }
+            reply() { local l; while read -r -t 20 -u 3 l; do echo "< $l"; [[ "${l:3:1}" == "-" ]] || break; done; }
+            send() { echo "> $1"; printf "%s\r\n" "$1" >&3; reply; }
+            reply
             send "EHLO ci.example.org"; send "MAIL FROM:<extern@example.org>"; send "RCPT TO:<anna@home.lan>"; send "DATA"
-            send "From: extern@example.org"; send "To: anna@home.lan"; send "Subject: Zustelltest"; send ""; send "Text"; send "."; send "QUIT"
-            timeout 3 cat <&3 || true'
+            printf "From: extern@example.org\r\nTo: anna@home.lan\r\nSubject: Zustelltest\r\n\r\nText\r\n.\r\n" >&3; reply
+            send "QUIT"'
           n=0
           for i in $(seq 1 40); do
             n="$(docker exec mailserver doveadm search -u anna@home.lan mailbox INBOX subject Zustelltest | wc -l)"
