@@ -23,6 +23,10 @@ case "${1:-}" in
       { env | grep -E '^CL_' | grep -v '^CL_PASS=' | sort; printf 'CL_PASSLEN=%s\n' "${#CL_PASS}"; } > "$LOG.cleanup.$(date +%s%N)"
       exit 0
     fi
+    if [[ "$*" == *"/upload.py:ro"* ]]; then        # Ablegen beim Anbieter: Einstellungen protokollieren (ohne Passwort)
+      { env | grep -E '^UP_' | grep -v '^UP_PASS=' | sort; printf 'UP_PASSLEN=%s\n' "${#UP_PASS}"; } > "$LOG.upload.$(date +%s%N)"
+      exit 0
+    fi
     if [[ "$*" == *"setup email add"* ]]; then
       IFS= read -r pw
       printf '%s|{SHA512-CRYPT}stub\n' "${*: -1}" >> "$cfg/postfix-accounts.cf"

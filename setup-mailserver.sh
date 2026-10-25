@@ -15,6 +15,8 @@
 #   ./setup-mailserver.sh --cleanup     beim Anbieter aufräumen: Posteingang/Spam/Papierkorb laut accounts.conf
 #   ./setup-mailserver.sh --cleanup --dry-run   dasselbe als Probelauf (zählt nur, löscht nichts)
 #   ./setup-mailserver.sh --empty-trash Gmail-Papierkorb sofort leeren
+#   ./setup-mailserver.sh --upload      lokale Mails beim Anbieter ABLEGEN (nur hinzufügen, unter dem Label "Vom-Server", nichts wird gelöscht)
+#       --upload --dry-run              nur zählen;  Optionen: --only=ADRESSE (ein Konto)  --label=NAME  --limit=N (Tageslimit)
 #   -y                                  ohne Rückfrage (mit allen Modi kombinierbar)
 #
 # Importierte Konten werden gemerkt (data/import-done/). Ein erneuter Lauf importiert sie
@@ -38,7 +40,7 @@ die()  { printf '\n\033[31mFehler: %s\033[0m\n' "$*" >&2; exit 1; }
 dq()   { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }
 
 # ---------------------------------------------------------------- Optionen
-ASSUME_YES=0; MODE="install"; REIMPORT=0; DRY_RUN=0
+ASSUME_YES=0; MODE="install"; REIMPORT=0; DRY_RUN=0; UP_ONLY=""; UP_LABEL="Vom-Server"; UP_LIMIT=0
 for arg in "$@"; do
   case "$arg" in
     -y) ASSUME_YES=1 ;;
@@ -47,6 +49,10 @@ for arg in "$@"; do
     --reimport) REIMPORT=1 ;;
     --cleanup) MODE="cleanup" ;;
     --empty-trash) MODE="empty-trash" ;;
+    --upload) MODE="upload" ;;
+    --only=*) UP_ONLY="${arg#*=}" ;;
+    --label=*) UP_LABEL="${arg#*=}" ;;
+    --limit=*) UP_LIMIT="${arg#*=}" ;;
     --dry-run) DRY_RUN=1 ;;
     -h|--help) sed -n '2,/^$/p' "$SELF"; exit 0 ;;
     *) die "Unbekannte Option: $arg  (siehe --help)" ;;
@@ -302,6 +308,44 @@ provider_cleanup() {   # $1 = 1: Papierkorb bei allen Anbietern leeren (--empty-
       python:3.13-alpine python -I /cleanup.py || echo "    Fehlgeschlagen für ${G_MAIL[$i]} (Passwort und IMAP prüfen)"
   done
 }
+
+# Legt lokale Mails beim Anbieter ab (nur HINZUFÜGEN, nie löschen). Die Arbeit macht upload_to_provider.py in einem Container:
+# eigenes Label (nicht der Posteingang, sonst holt die POP3-Abholung die Mails wieder ab), Abgleich über die Message-ID, ohne Doppelte.
+provider_upload() {
+  command -v docker >/dev/null || die "Docker fehlt."
+  [[ -f "$BASE/upload_to_provider.py" ]] || die "upload_to_provider.py fehlt im Ordner $BASE."
+  [[ "$UP_LIMIT" =~ ^[0-9]+$ ]] || die "--limit muss eine Zahl sein."
+  [[ "$UP_LABEL" =~ ^[A-Za-z0-9._\ -]+$ ]] || die "--label darf nur Buchstaben, Ziffern, Leerzeichen, Punkt, Minus und Unterstrich enthalten."
+  local i A U D T found=0
+  for i in "${!L_ADDR[@]}"; do
+    [[ -z "$UP_ONLY" || "$UP_ONLY" == "${G_MAIL[$i]}" || "$UP_ONLY" == "${L_ADDR[$i]}" || "$UP_ONLY" == "${L_ADDR[$i]%@*}" ]] || continue
+    found=1
+    A="${L_ADDR[$i]}"; U="${A%@*}"; D="${A#*@}"; T="$BASE/data/mail-data/$D/$U"
+    echo "  ${G_MAIL[$i]} (${PROV_NAME[${G_PROV[$i]}]}):"
+    if [[ -z "$(find "$T" -type f \( -path '*/cur/*' -o -path '*/new/*' \) -print -quit 2>/dev/null)" ]]; then
+      echo "    übersprungen (lokal keine Mails)"
+      continue
+    fi
+    UP_PROV="${G_PROV[$i]}" UP_USER="${G_MAIL[$i]}" UP_PASS="${G_PASS[$i]}" UP_HOST="$(prov_host imap "${G_PROV[$i]}" "${G_MAIL[$i]}")" \
+    UP_LABEL="$UP_LABEL" UP_LIMIT="$UP_LIMIT" UP_DRY="$DRY_RUN" UP_MAILDIR=/mail \
+    docker run --rm -i -v "$BASE/upload_to_provider.py:/upload.py:ro" -v "$T:/mail:ro" \
+      -e UP_PROV -e UP_USER -e UP_PASS -e UP_HOST -e UP_LABEL -e UP_LIMIT -e UP_DRY -e UP_MAILDIR \
+      python:3.13-alpine python -I /upload.py || echo "    Fehlgeschlagen für ${G_MAIL[$i]} (Passwort und IMAP prüfen)"
+  done
+  (( found )) || die "Kein Konto passt zu --only=$UP_ONLY."
+}
+
+if [[ "$MODE" == "upload" ]]; then
+  say "Lokale Mails beim Anbieter ablegen ($(date '+%F %T'))$( ((DRY_RUN)) && echo ' - PROBELAUF' )"
+  if ((! DRY_RUN && ! ASSUME_YES)); then
+    echo "  Die Mails werden unter dem Label \"$UP_LABEL\" beim Anbieter HINZUGEFÜGT (nichts wird gelöscht oder verändert)."
+    echo "  Das belegt Speicher im Konto. Zuerst mit --dry-run zählen lassen."
+    read -r -p "  Jetzt hochladen? [j/N] " ans || ans=""
+    [[ "$ans" =~ ^[jJyY]$ ]] || { echo "Abgebrochen."; exit 0; }
+  fi
+  provider_upload
+  exit 0
+fi
 
 # Nur beim Anbieter aufräumen, nichts installieren
 #   --cleanup      = nach den Einstellungen in accounts.conf (das nutzt der tägliche Cron-Job)

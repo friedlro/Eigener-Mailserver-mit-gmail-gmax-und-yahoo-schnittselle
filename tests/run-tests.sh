@@ -51,7 +51,7 @@ new_instance() {
     sed -e '/exec sudo/d' -e '/-t 0 && -t 1/d' "$ROOT/$f" > "$d/$f"
   done
   cp "$ROOT/mcp/install.sh" "$d/mcp/"
-  cp "$ROOT/cleanup.py" "$ROOT/usbdisks.py" "$d/"
+  cp "$ROOT/cleanup.py" "$ROOT/usbdisks.py" "$ROOT/upload_to_provider.py" "$d/"
   echo "$d"
 }
 
@@ -301,8 +301,29 @@ printf '%s\n' 'GMAIL_EMPTY_TRASH=1' 'GMAIL_TRASH_DAYS=30' 'anna@gmail.com|abcdab
 rm -f "$D"/stub.cleanup.*
 run "$D" bash setup-mailserver.sh --cleanup
 check "Ältere GMAIL_EMPTY_TRASH-Einstellung funktioniert weiter" bash -c "f=\"$(cl anna@gmail.com)\"; grep -qx 'CL_TRASH=1' \"\$f\" && grep -qx 'CL_DAYS=30' \"\$f\""
+# Lokale Mails beim Anbieter ablegen (--upload)
+printf '%s\n' 'anna@gmail.com|abcdabcdabcdabcd|anna' 'ben@gmx.at|GmxSecret99|ben' 'dora@gmx.de|DoraSecret1|dora' > "$D/accounts.conf"
+rm -f "$D"/stub.upload.*
+run "$D" bash setup-mailserver.sh --upload --dry-run
+up() { grep -l "^UP_USER=$1" "$D"/stub.upload.* | head -n1; }
+check "Ablegen: Probelauf endet mit Exit-Code 0 und ist gekennzeichnet" bash -c "[[ $RC -eq 0 ]] && grep -q 'PROBELAUF' '$D/out'"
+check "Ablegen: ein Container je Konto mit lokalen Mails (Konto ohne Mails übersprungen)" bash -c "[[ \$(ls '$D'/stub.upload.* | wc -l) -eq 2 ]] && grep -A1 'dora@gmx.de' '$D/out' | grep -q 'übersprungen'"
+check "Ablegen: Probelauf, Label und Anbieter-Server kommen an" bash -c "f=\"$(up ben@gmx.at)\"; grep -qx 'UP_DRY=1' \"\$f\" && grep -qx 'UP_LABEL=Vom-Server' \"\$f\" && grep -qx 'UP_HOST=imap.gmx.net' \"\$f\" && grep -qx 'UP_PROV=gmx' \"\$f\""
+check "Ablegen: Passwörter stehen nie in Docker-Argumenten, kommen aber im Container an" bash -c "! grep -qE 'GmxSecret99|abcdabcdabcdabcd' '$D/stub.args' && grep -qx 'UP_PASSLEN=11' \"$(up ben@gmx.at)\""
+check "Ablegen: Container sieht die lokalen Mails nur lesend" bash -c "grep -E 'upload.py:ro' '$D/stub.args' | grep -q ':/mail:ro'"
+rm -f "$D"/stub.upload.*
+run "$D" bash -c "bash setup-mailserver.sh --upload </dev/null"
+check "Ablegen: ohne -y und ohne Bestätigung wird nichts hochgeladen" bash -c "grep -q 'Abgebrochen' '$D/out' && ! ls '$D'/stub.upload.* >/dev/null 2>&1"
+run "$D" bash setup-mailserver.sh --upload -y --only=anna@gmail.com '--label=Test 2026' --limit=5
+check "Ablegen: -y, ein Konto, Label und Limit" bash -c "[[ \$(ls '$D'/stub.upload.* | wc -l) -eq 1 ]] && f=\"$(up anna@gmail.com)\" && grep -qx 'UP_DRY=0' \"\$f\" && grep -qx 'UP_LABEL=Test 2026' \"\$f\" && grep -qx 'UP_LIMIT=5' \"\$f\""
+run "$D" bash setup-mailserver.sh --upload -y '--label=a;b'
+check "Ablegen: unzulässiges Label wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q -- '--label' '$D/out'"
+run "$D" bash setup-mailserver.sh --upload -y --only=gibtsnicht
+check "Ablegen: unbekanntes Konto wird abgelehnt" bash -c "[[ $RC -ne 0 ]] && grep -q 'Kein Konto passt' '$D/out'"
 check "cleanup.py ist gültiges Python" python3 -I -m py_compile "$ROOT/cleanup.py"
 check "cleanup.py: Tests mit nachgebautem IMAP-Server" python3 -I "$ROOT/tests/test_cleanup.py"
+check "upload_to_provider.py ist gültiges Python" python3 -I -m py_compile "$ROOT/upload_to_provider.py"
+check "upload_to_provider.py: Tests mit nachgebautem IMAP-Server" python3 -I "$ROOT/tests/test_upload.py"
 check "merge_mailboxes.py ist gültiges Python" python3 -I -m py_compile "$ROOT/merge_mailboxes.py"
 check "merge_mailboxes.py: Tests mit nachgebauten Postfächern" python3 -I "$ROOT/tests/test_merge.py"
 
