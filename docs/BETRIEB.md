@@ -196,6 +196,23 @@ GMAIL_SENT_DAYS=30
 **Vorher ansehen, was gelöscht würde (ändert nichts):** `sudo ./setup-mailserver.sh --cleanup --dry-run`.
 Von Hand sofort: `./setup-mailserver.sh --cleanup` (nach der Konfiguration) oder `--empty-trash` (Papierkorb bei allen Anbietern).
 
+## Lokale Mails zurück zum Anbieter legen (Gmail, GMX, Yahoo)
+
+Mit `--upload` werden die Mails vom Server per IMAP beim Anbieter abgelegt, zum Beispiel als zusätzliche Sicherung bei Google oder wenn Mails dort versehentlich fehlen. Es wird nur **hinzugefügt**: nichts wird beim Anbieter oder lokal gelöscht oder verändert.
+
+```bash
+sudo ./setup-mailserver.sh --upload --dry-run      # zählt nur, lädt nichts hoch
+sudo ./setup-mailserver.sh --upload                # fragt nach und lädt hoch
+sudo ./setup-mailserver.sh --upload --only=roland --limit=2000 --label=Vom-Server
+```
+
+- **Eigenes Label, nicht der Posteingang.** Die Mails landen unter `Vom-Server/<Ordnername>` (Posteingang als `Vom-Server/Posteingang`). Im Posteingang würde die laufende POP3-Abholung sie sofort wieder abholen.
+- **Keine Doppelten.** Was beim Anbieter schon vorhanden ist (gleiche Message-ID), wird übersprungen. Bei Gmail zählt das ganze Konto ("Alle Nachrichten"). Ein erneuter Aufruf lädt nur nach, was noch fehlt. Mails ohne Message-ID bekommen beim Hochladen eine aus ihrem Inhalt berechnete.
+- **Flags und Datum bleiben**: gelesen, beantwortet, markiert und das Originaldatum.
+- **Papierkorb, Spam und Entwürfe** werden nicht hochgeladen.
+- **Speicher und Tempo.** Die hochgeladenen Mails zählen zum Speicher des Kontos (bei Gmail 15 GB). Anbieter begrenzen die tägliche Übertragung. Mit `--limit=N` aufhören und am nächsten Tag erneut aufrufen.
+- Das Skript braucht das App-Passwort des Kontos aus `accounts.conf` und läuft in einem Container, das Passwort steht nie in einer Befehlszeile.
+
 ## Zur Seite gelegte Mails zurückholen
 
 Wurde `DOMAIN` einmal falsch gesetzt, können Mails in einem zweiten Postfach landen (`data/mail-data/<falsche-domain>/<name>`). Lege diese Ordner zur Seite, statt sie zu löschen:
