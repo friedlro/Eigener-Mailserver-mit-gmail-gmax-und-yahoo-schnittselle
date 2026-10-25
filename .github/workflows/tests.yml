@@ -73,13 +73,14 @@ jobs:
         run: |
           # Die Einstellung muss im LAUFENDEN Postfix stehen (nicht nur in der Datei)
           docker exec mailserver postconf -M smtp-amavis/unix | tr ' ' '\n' | grep -x 'smtp_generic_maps=texthash:/dev/null'
-          # Zustellung wie fetchmail: SMTP an Port 25, Absender von außen, Empfänger lokal
-          python3 - <<'PY'
-          import smtplib
-          s = smtplib.SMTP("127.0.0.1", 25, timeout=30)
-          s.sendmail("extern@example.org", ["anna@home.lan"], "From: extern@example.org\nTo: anna@home.lan\nSubject: Zustelltest\n\nText\n")
-          s.quit()
-          PY
+          # Zustellung wie fetchmail: SMTP an Port 25 im Container (der Port ist nicht nach außen veröffentlicht), Absender von außen, Empfänger lokal
+          docker exec mailserver bash -c '
+            exec 3<>/dev/tcp/127.0.0.1/25
+            read -r -t 10 -u 3 banner; echo "$banner"
+            send() { printf "%s\r\n" "$1" >&3; sleep 1; }
+            send "EHLO ci.example.org"; send "MAIL FROM:<extern@example.org>"; send "RCPT TO:<anna@home.lan>"; send "DATA"
+            send "From: extern@example.org"; send "To: anna@home.lan"; send "Subject: Zustelltest"; send ""; send "Text"; send "."; send "QUIT"
+            timeout 3 cat <&3 || true'
           n=0
           for i in $(seq 1 40); do
             n="$(docker exec mailserver doveadm search -u anna@home.lan mailbox INBOX subject Zustelltest | wc -l)"
